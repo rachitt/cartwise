@@ -32,7 +32,7 @@ describe("createCache", () => {
     ).resolves.toEqual({ fresh: true });
     expect(db.entry).toEqual({
       key: "expired",
-      payload: { fresh: true },
+      payload: { v: { fresh: true }, storedAt: "2026-07-04T12:00:00.000Z" },
       expiresAt: new Date("2026-07-04T12:01:30Z"),
     });
   });
@@ -49,6 +49,67 @@ describe("createCache", () => {
         throw new Error("upstream failed");
       }),
     ).resolves.toEqual({ stale: true });
+  });
+
+  it("returns metadata for a fresh cached payload", async () => {
+    const now = new Date("2026-07-04T12:00:00Z");
+    const storedAt = new Date("2026-07-04T11:55:00Z");
+    const db = fakeCacheDb({
+      key: "fresh",
+      payload: { v: { ok: true }, storedAt: storedAt.toISOString() },
+      expiresAt: new Date("2026-07-04T12:05:00Z"),
+    });
+    const loader = vi.fn(async () => ({ ok: false }));
+
+    await expect(createCache(db, () => now).withCacheMeta("fresh", 60, loader)).resolves.toEqual({
+      value: { ok: true },
+      fresh: true,
+      capturedAt: storedAt,
+    });
+    expect(loader).not.toHaveBeenCalled();
+  });
+
+  it("returns stale metadata when the loader fails after expiry", async () => {
+    const storedAt = new Date("2026-07-04T11:55:00Z");
+    const db = fakeCacheDb({
+      key: "stale",
+      payload: { v: { stale: true }, storedAt: storedAt.toISOString() },
+      expiresAt: new Date("2026-07-04T11:56:00Z"),
+    });
+
+    await expect(
+      createCache(db, () => new Date("2026-07-04T12:00:00Z")).withCacheMeta(
+        "stale",
+        60,
+        async () => {
+          throw new Error("upstream failed");
+        },
+      ),
+    ).resolves.toEqual({
+      value: { stale: true },
+      fresh: false,
+      capturedAt: storedAt,
+    });
+  });
+
+  it("reads legacy bare payloads through withCache and withCacheMeta", async () => {
+    const now = new Date("2026-07-04T12:00:00Z");
+    const db = fakeCacheDb({
+      key: "legacy",
+      payload: { legacy: true },
+      expiresAt: new Date("2026-07-04T12:05:00Z"),
+    });
+
+    await expect(createCache(db, () => now).withCache("legacy", 300, async () => ({}))).resolves.toEqual(
+      { legacy: true },
+    );
+    await expect(
+      createCache(db, () => now).withCacheMeta("legacy", 300, async () => ({})),
+    ).resolves.toEqual({
+      value: { legacy: true },
+      fresh: true,
+      capturedAt: new Date("2026-07-04T12:00:00Z"),
+    });
   });
 
   it("rethrows loader errors when nothing is cached", async () => {

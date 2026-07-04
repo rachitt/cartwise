@@ -2,9 +2,9 @@ import type { ChainSlug, Product, Store, StorePrice } from "@cartwise/shared";
 import type { FastifyPluginAsync, FastifyReply } from "fastify";
 import { z } from "zod";
 
-import { createCache, type Cache } from "../cache.js";
+import { createCache, type Cache, type CacheResult } from "../cache.js";
 import { upsertCollectedProduct } from "../catalog/matcher.js";
-import type { CollectedProduct } from "../collectors/types.js";
+import type { CollectedProduct, Collector } from "../collectors/types.js";
 import type { CartwiseDb, ProductRow } from "../db/repository.js";
 
 const CHAINS: ChainSlug[] = ["kroger", "target", "walmart", "aldi"];
@@ -58,8 +58,16 @@ const productPricesQuerySchema = z.object({
 
 export interface PriceApiDeps {
   db: CartwiseDb;
-  getCollector(chain: ChainSlug): import("../collectors/types.js").Collector | null;
+  getCollector(chain: ChainSlug): Collector | null;
   cache?: Cache;
+}
+
+type SourceStatus = "live" | "stale" | "error" | "unavailable";
+
+interface ResponseSource {
+  chain: ChainSlug;
+  status: SourceStatus;
+  capturedAt?: string;
 }
 
 export const priceApiPlugin: FastifyPluginAsync<PriceApiDeps> = async (app, deps) => {
@@ -72,26 +80,38 @@ export const priceApiPlugin: FastifyPluginAsync<PriceApiDeps> = async (app, deps
     }
 
     const stores: Store[] = [];
+    const sources: ResponseSource[] = [];
 
     for (const chain of CHAINS) {
       const collector = deps.getCollector(chain);
       if (!collector) {
+        sources.push({ chain, status: "unavailable" });
         continue;
       }
 
-      const collectedStores = await cache.withCache(
+      const result = await collectWithSource(
+        sources,
+        chain,
+        cache,
         `stores:${chain}:${query.zip}`,
         STORES_TTL_SECONDS,
         () => collector.findStores(query.zip),
       );
+      if (!result) {
+        continue;
+      }
 
-      for (const collectedStore of collectedStores) {
+      for (const collectedStore of result.value) {
         const row = await deps.db.upsertStore(chain, collectedStore);
         stores.push(toStore(row));
       }
     }
 
-    return { stores };
+    if (shouldReturnCollectorFailure(sources)) {
+      return reply.code(503).send({ error: "Collectors unavailable", sources });
+    }
+
+    return { stores, sources };
   });
 
   app.get("/search", async (request, reply) => {
@@ -103,20 +123,28 @@ export const priceApiPlugin: FastifyPluginAsync<PriceApiDeps> = async (app, deps
     const stores = await deps.db.getStoresByIds(query.storeIds);
     const groupedResults = new Map<string, { product: Product; prices: StorePrice[] }>();
     const normalizedQuery = normalizeSearchQuery(query.q);
+    const sources: ResponseSource[] = [];
 
     for (const store of stores) {
       const collector = deps.getCollector(store.chainSlug);
       if (!collector) {
+        sources.push({ chain: store.chainSlug, status: "unavailable" });
         continue;
       }
 
-      const collectedProducts = await cache.withCache(
+      const result = await collectWithSource(
+        sources,
+        store.chainSlug,
+        cache,
         `search:${store.chainSlug}:${store.externalLocationId}:${normalizedQuery}`,
         PRODUCTS_TTL_SECONDS,
         () => collector.searchProducts(query.q, store.externalLocationId),
       );
+      if (!result) {
+        continue;
+      }
 
-      for (const collectedProduct of collectedProducts.map(normalizeCollectedProductDates)) {
+      for (const collectedProduct of result.value.map(normalizeCollectedProductDates)) {
         const matched = await upsertCollectedProduct(
           deps.db,
           collectedProduct,
@@ -141,7 +169,11 @@ export const priceApiPlugin: FastifyPluginAsync<PriceApiDeps> = async (app, deps
       prices: sortPrices(result.prices),
     }));
 
-    return { results };
+    if (shouldReturnCollectorFailure(sources)) {
+      return reply.code(503).send({ error: "Collectors unavailable", sources });
+    }
+
+    return { results, sources };
   });
 
   app.get("/products/:id/prices", async (request, reply) => {
@@ -158,20 +190,28 @@ export const priceApiPlugin: FastifyPluginAsync<PriceApiDeps> = async (app, deps
 
     const mappings = await deps.db.getStoreProductsForProduct(product.id, query.storeIds);
     const prices: StorePrice[] = [];
+    const sources: ResponseSource[] = [];
 
     for (const mapping of mappings) {
       const collector = deps.getCollector(mapping.store.chainSlug);
       if (!collector) {
+        sources.push({ chain: mapping.store.chainSlug, status: "unavailable" });
         continue;
       }
 
-      const collectedPrices = await cache.withCache(
+      const result = await collectWithSource(
+        sources,
+        mapping.store.chainSlug,
+        cache,
         `price:${mapping.store.chainSlug}:${mapping.store.externalLocationId}:${mapping.externalProductId}`,
         PRODUCTS_TTL_SECONDS,
         () => collector.getPrices([mapping.externalProductId], mapping.store.externalLocationId),
       );
+      if (!result) {
+        continue;
+      }
 
-      for (const collectedProduct of collectedPrices.map(normalizeCollectedProductDates)) {
+      for (const collectedProduct of result.value.map(normalizeCollectedProductDates)) {
         if (
           collectedProduct.externalProductId !== mapping.externalProductId ||
           collectedProduct.price === null
@@ -198,9 +238,45 @@ export const priceApiPlugin: FastifyPluginAsync<PriceApiDeps> = async (app, deps
       }
     }
 
-    return { product: toProduct(product), prices: sortPrices(prices) };
+    if (shouldReturnCollectorFailure(sources)) {
+      return reply.code(503).send({ error: "Collectors unavailable", sources });
+    }
+
+    return { product: toProduct(product), prices: sortPrices(prices), sources };
   });
 };
+
+async function collectWithSource<T>(
+  sources: ResponseSource[],
+  chain: ChainSlug,
+  cache: Cache,
+  key: string,
+  ttlSeconds: number,
+  fn: () => Promise<T>,
+): Promise<CacheResult<T> | null> {
+  try {
+    const result = cache.withCacheMeta
+      ? await cache.withCacheMeta(key, ttlSeconds, fn)
+      : { value: await cache.withCache(key, ttlSeconds, fn), fresh: true, capturedAt: new Date() };
+    sources.push({
+      chain,
+      status: result.fresh ? "live" : "stale",
+      capturedAt: result.capturedAt.toISOString(),
+    });
+    return result;
+  } catch {
+    sources.push({ chain, status: "error" });
+    return null;
+  }
+}
+
+function shouldReturnCollectorFailure(sources: ResponseSource[]): boolean {
+  const configuredSources = sources.filter((source) => source.status !== "unavailable");
+  return (
+    configuredSources.length > 0 &&
+    configuredSources.every((source) => source.status === "error")
+  );
+}
 
 function parseOr400<T extends z.ZodTypeAny>(
   schema: T,
