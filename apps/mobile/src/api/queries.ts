@@ -3,17 +3,22 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   createCart,
   finalizeCart,
+  getAlerts,
   getCurrentCart,
   getProductPrices,
   getStores,
+  markAlertRead,
+  removeWatch,
   searchProducts,
   updateCartItem,
+  type AlertsResponse,
   type CartResponse,
 } from '@/api/client';
 
 const sortedStoreIds = (storeIds: string[]) => [...storeIds].sort();
 export const currentCartQueryKey = ['cart', 'current'] as const;
 export const cartOptimizationQueryKey = ['cart', 'optimization'] as const;
+export const alertsQueryKey = ['alerts'] as const;
 
 export function useStores(zip: string) {
   return useQuery({
@@ -84,6 +89,56 @@ export function useFinalizeCart() {
     onSuccess: (data) => {
       queryClient.setQueryData(cartOptimizationQueryKey, data);
       queryClient.invalidateQueries({ queryKey: currentCartQueryKey });
+    },
+  });
+}
+
+export function useAlerts(enabled = true) {
+  return useQuery({
+    queryKey: alertsQueryKey,
+    queryFn: getAlerts,
+    enabled,
+  });
+}
+
+export function useMarkAlertRead() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: markAlertRead,
+    onSuccess: (updatedAlert) => {
+      queryClient.setQueryData<AlertsResponse>(alertsQueryKey, (current) => {
+        if (!current) {
+          return current;
+        }
+
+        return {
+          ...current,
+          alerts: current.alerts.map((alert) =>
+            alert.id === updatedAlert.id ? updatedAlert : alert,
+          ),
+        };
+      });
+    },
+  });
+}
+
+export function useRemoveWatch() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: removeWatch,
+    onSuccess: (_data, watchId) => {
+      queryClient.setQueryData<AlertsResponse>(alertsQueryKey, (current) => {
+        if (!current) {
+          return current;
+        }
+
+        return {
+          ...current,
+          watches: current.watches.filter((watch) => watch.id !== watchId),
+        };
+      });
     },
   });
 }

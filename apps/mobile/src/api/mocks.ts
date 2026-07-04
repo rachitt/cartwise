@@ -1,6 +1,6 @@
 import type { CartOptimization, Product, Store, StorePrice, SwapSuggestion } from '@cartwise/shared';
 
-import type { Cart } from '@/api/client';
+import type { Cart, PriceAlert, PriceWatch } from '@/api/client';
 
 const hoursAgo = (hours: number) => new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
 
@@ -371,6 +371,58 @@ const swapAlternatives: Record<string, { toProductId: string; reason: SwapSugges
 };
 
 let mockCart: Cart | null = null;
+let mockAlerts: PriceAlert[] = [
+  {
+    id: 'mock-alert-milk',
+    productName: 'Whole Milk',
+    storeName: 'Target Newport Pavilion',
+    oldPrice: 5.29,
+    newPrice: 4.79,
+    capturedAt: hoursAgo(1),
+    read: false,
+  },
+  {
+    id: 'mock-alert-chicken',
+    productName: 'Boneless Skinless Chicken Breast',
+    storeName: 'Kroger Downtown Cincinnati',
+    oldPrice: 4.99,
+    newPrice: 3.99,
+    capturedAt: hoursAgo(5),
+    read: true,
+  },
+  {
+    id: 'mock-alert-yogurt',
+    productName: 'Plain Greek Yogurt',
+    storeName: 'Target Newport Pavilion',
+    oldPrice: 6.29,
+    newPrice: 5.49,
+    capturedAt: hoursAgo(28),
+    read: true,
+  },
+];
+let mockWatches: PriceWatch[] = [
+  {
+    id: 'mock-watch-eggs',
+    productName: 'Large Brown Eggs',
+    baselinePrice: 4.29,
+    active: true,
+    storeIds: ['kroger-downtown-45202', 'target-newport-45202', 'walmart-fort-wright-45202'],
+  },
+  {
+    id: 'mock-watch-bread',
+    productName: 'Soft Sandwich Bread',
+    baselinePrice: 3.49,
+    active: true,
+    storeIds: ['kroger-downtown-45202', 'target-newport-45202'],
+  },
+  {
+    id: 'mock-watch-avocados',
+    productName: 'Hass Avocados',
+    baselinePrice: 4.99,
+    active: true,
+    storeIds: ['kroger-downtown-45202', 'walmart-fort-wright-45202'],
+  },
+];
 
 function effectivePrice(price: Omit<StorePrice, 'capturedAt'> | StorePrice) {
   return price.promoPrice ?? price.price;
@@ -582,4 +634,33 @@ export function finalizeMockCart(storeIds: string[]): CartOptimization {
     swapSuggestions,
     pricesAsOf,
   };
+}
+
+export function registerMockPushToken() {
+  return { ok: true } as const;
+}
+
+export function getMockAlerts() {
+  return {
+    alerts: mockAlerts.map((alert) => ({ ...alert })),
+    watches: mockWatches.map((watch) => ({ ...watch, storeIds: [...watch.storeIds] })),
+  };
+}
+
+export function markMockAlertRead(alertId: string) {
+  mockAlerts = mockAlerts.map((alert) =>
+    alert.id === alertId ? { ...alert, read: true } : alert,
+  );
+
+  const updatedAlert = mockAlerts.find((alert) => alert.id === alertId);
+  if (!updatedAlert) {
+    throw new Error(`Unknown mock alert ${alertId}`);
+  }
+
+  return { ...updatedAlert };
+}
+
+export function removeMockWatch(watchId: string) {
+  mockWatches = mockWatches.filter((watch) => watch.id !== watchId);
+  return { ok: true } as const;
 }
