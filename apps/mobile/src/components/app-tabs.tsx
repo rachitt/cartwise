@@ -2,6 +2,7 @@ import { Tabs } from 'expo-router';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { useColorScheme } from 'react-native';
 
+import { useCurrentCart } from '@/api/queries';
 import { Colors } from '@/constants/theme';
 
 const icons: Record<string, SymbolViewProps['name']> = {
@@ -14,6 +15,9 @@ const icons: Record<string, SymbolViewProps['name']> = {
 export default function AppTabs() {
   const scheme = useColorScheme();
   const colors = Colors[scheme === 'unspecified' ? 'light' : scheme];
+  const cartQuery = useCurrentCart();
+  const cartItemCount =
+    cartQuery.data?.cart.items.reduce((sum, item) => sum + item.qty, 0) ?? 0;
 
   return (
     <Tabs
@@ -30,7 +34,10 @@ export default function AppTabs() {
         ),
       })}>
       <Tabs.Screen name="index" options={{ title: 'Search' }} />
-      <Tabs.Screen name="cart" options={{ title: 'Cart' }} />
+      <Tabs.Screen
+        name="cart"
+        options={{ title: 'Cart', tabBarBadge: cartItemCount > 0 ? cartItemCount : undefined }}
+      />
       <Tabs.Screen name="alerts" options={{ title: 'Alerts' }} />
       <Tabs.Screen name="settings" options={{ title: 'Settings' }} />
     </Tabs>

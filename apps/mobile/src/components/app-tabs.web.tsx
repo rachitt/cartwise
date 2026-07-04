@@ -11,9 +11,14 @@ import { Pressable, View, StyleSheet } from 'react-native';
 import { ThemedText } from './themed-text';
 import { ThemedView } from './themed-view';
 
+import { useCurrentCart } from '@/api/queries';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 
 export default function AppTabs() {
+  const cartQuery = useCurrentCart();
+  const cartItemCount =
+    cartQuery.data?.cart.items.reduce((sum, item) => sum + item.qty, 0) ?? 0;
+
   return (
     <Tabs>
       <TabSlot style={{ height: '100%' }} />
@@ -23,7 +28,7 @@ export default function AppTabs() {
             <TabButton>Search</TabButton>
           </TabTrigger>
           <TabTrigger name="cart" href="/cart" asChild>
-            <TabButton>Cart</TabButton>
+            <TabButton badge={cartItemCount}>Cart</TabButton>
           </TabTrigger>
           <TabTrigger name="alerts" href="/alerts" asChild>
             <TabButton>Alerts</TabButton>
@@ -37,7 +42,12 @@ export default function AppTabs() {
   );
 }
 
-export function TabButton({ children, isFocused, ...props }: TabTriggerSlotProps) {
+export function TabButton({
+  children,
+  isFocused,
+  badge = 0,
+  ...props
+}: TabTriggerSlotProps & { badge?: number }) {
   return (
     <Pressable {...props} style={({ pressed }) => pressed && styles.pressed}>
       <ThemedView
@@ -46,6 +56,13 @@ export function TabButton({ children, isFocused, ...props }: TabTriggerSlotProps
         <ThemedText type="small" themeColor={isFocused ? 'text' : 'textSecondary'}>
           {children}
         </ThemedText>
+        {badge > 0 ? (
+          <ThemedView type="accent" style={styles.badge}>
+            <ThemedText type="smallBold" style={styles.badgeText}>
+              {badge}
+            </ThemedText>
+          </ThemedView>
+        ) : null}
       </ThemedView>
     </Pressable>
   );
@@ -94,5 +111,20 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.one,
     paddingHorizontal: Spacing.three,
     borderRadius: Spacing.three,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one,
+  },
+  badge: {
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.one,
+  },
+  badgeText: {
+    color: '#ffffff',
+    lineHeight: 18,
   },
 });

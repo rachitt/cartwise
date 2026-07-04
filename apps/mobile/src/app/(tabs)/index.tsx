@@ -9,10 +9,12 @@ import {
   StyleSheet,
   TextInput,
   View,
+  type GestureResponderEvent,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { useSearchProducts, useStores } from '@/api/queries';
+import { useCurrentCart, useSearchProducts, useStores, useUpdateCartItem } from '@/api/queries';
+import { CartQuantityStepper } from '@/components/cart-quantity-stepper';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
@@ -28,10 +30,16 @@ export default function SearchScreen() {
   const theme = useTheme();
   const storesQuery = useStores(zip);
   const searchQuery = useSearchProducts(debouncedSearchText, selectedStoreIds);
+  const cartQuery = useCurrentCart();
+  const updateCartItem = useUpdateCartItem();
 
   const storeById = useMemo(
     () => new Map((storesQuery.data?.stores ?? []).map((store) => [store.id, store])),
     [storesQuery.data?.stores],
+  );
+  const cartItemByProductId = useMemo(
+    () => new Map((cartQuery.data?.cart.items ?? []).map((item) => [item.productId, item])),
+    [cartQuery.data?.cart.items],
   );
 
   useEffect(() => {
@@ -89,6 +97,8 @@ export default function SearchScreen() {
                 const cheapest = getCheapestPrice(result.prices);
                 const store = cheapest ? storeById.get(cheapest.storeId) : undefined;
                 const size = formatProductSize(result.product.sizeQty, result.product.sizeUnit);
+                const cartItem = cartItemByProductId.get(result.product.id);
+                const qty = cartItem?.qty ?? 0;
 
                 return (
                   <Pressable
@@ -132,6 +142,35 @@ export default function SearchScreen() {
                           <ThemedText type="small" themeColor="textSecondary">
                             No prices
                           </ThemedText>
+                        )}
+                        {qty > 0 ? (
+                          <CartQuantityStepper
+                            compact
+                            qty={qty}
+                            disabled={updateCartItem.isPending}
+                            onChange={(nextQty) =>
+                              updateCartItem.mutate({ productId: result.product.id, qty: nextQty })
+                            }
+                          />
+                        ) : (
+                          <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel={`Add ${result.product.name} to cart`}
+                            disabled={updateCartItem.isPending}
+                            onPress={(event: GestureResponderEvent) => {
+                              event.stopPropagation();
+                              updateCartItem.mutate({ productId: result.product.id, qty: 1 });
+                            }}
+                            style={({ pressed }) => [
+                              styles.addButton,
+                              { backgroundColor: theme.accent },
+                              pressed && styles.pressed,
+                              updateCartItem.isPending && styles.disabled,
+                            ]}>
+                            <ThemedText type="smallBold" style={styles.addButtonText}>
+                              Add
+                            </ThemedText>
+                          </Pressable>
                         )}
                       </View>
                     </ThemedView>
@@ -233,6 +272,7 @@ const styles = StyleSheet.create({
   priceBlock: {
     alignItems: 'flex-end',
     gap: Spacing.one,
+    minWidth: 104,
   },
   badge: {
     borderRadius: 8,
@@ -241,6 +281,19 @@ const styles = StyleSheet.create({
   },
   pressed: {
     opacity: 0.72,
+  },
+  addButton: {
+    minHeight: 36,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.three,
+  },
+  addButtonText: {
+    color: '#ffffff',
+  },
+  disabled: {
+    opacity: 0.5,
   },
   skeletonStack: {
     gap: Spacing.three,

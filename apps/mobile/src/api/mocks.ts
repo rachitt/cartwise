@@ -1,4 +1,6 @@
-import type { Product, Store, StorePrice } from '@cartwise/shared';
+import type { CartOptimization, Product, Store, StorePrice, SwapSuggestion } from '@cartwise/shared';
+
+import type { Cart } from '@/api/client';
 
 const hoursAgo = (hours: number) => new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
 
@@ -156,6 +158,126 @@ export const mockProducts: Product[] = [
     category: 'Pantry',
     imageUrl: null,
   },
+  {
+    id: 'store-brand-milk-half-gallon',
+    name: 'Whole Milk',
+    brand: 'Kroger',
+    sizeQty: 64,
+    sizeUnit: 'fl oz',
+    upc: '011110123456',
+    category: 'Dairy',
+    imageUrl: null,
+  },
+  {
+    id: 'store-brand-eggs-dozen',
+    name: 'Large Grade A Eggs',
+    brand: 'Great Value',
+    sizeQty: 12,
+    sizeUnit: 'ct',
+    upc: '078742192837',
+    category: 'Dairy',
+    imageUrl: null,
+  },
+  {
+    id: 'store-brand-sandwich-bread',
+    name: 'Soft White Sandwich Bread',
+    brand: 'Market Pantry',
+    sizeQty: 20,
+    sizeUnit: 'oz',
+    upc: '085239111222',
+    category: 'Bakery',
+    imageUrl: null,
+  },
+  {
+    id: 'market-bananas',
+    name: 'Yellow Bananas',
+    brand: 'Market Fresh',
+    sizeQty: 1,
+    sizeUnit: 'lb',
+    upc: null,
+    category: 'Produce',
+    imageUrl: null,
+  },
+  {
+    id: 'single-avocados',
+    name: 'Hass Avocados',
+    brand: 'Market Fresh',
+    sizeQty: 4,
+    sizeUnit: 'ct',
+    upc: null,
+    category: 'Produce',
+    imageUrl: null,
+  },
+  {
+    id: 'store-brand-chicken-breast',
+    name: 'Boneless Skinless Chicken Breast',
+    brand: 'Kroger',
+    sizeQty: 1,
+    sizeUnit: 'lb',
+    upc: '011110806559',
+    category: 'Meat',
+    imageUrl: null,
+  },
+  {
+    id: 'ground-turkey',
+    name: 'Ground Turkey 93% Lean',
+    brand: 'Good & Gather',
+    sizeQty: 1,
+    sizeUnit: 'lb',
+    upc: '085239444555',
+    category: 'Meat',
+    imageUrl: null,
+  },
+  {
+    id: 'store-brand-cheddar-shreds',
+    name: 'Sharp Cheddar Shredded Cheese',
+    brand: 'Great Value',
+    sizeQty: 8,
+    sizeUnit: 'oz',
+    upc: '078742555666',
+    category: 'Dairy',
+    imageUrl: null,
+  },
+  {
+    id: 'store-brand-greek-yogurt',
+    name: 'Plain Greek Yogurt',
+    brand: 'Good & Gather',
+    sizeQty: 32,
+    sizeUnit: 'oz',
+    upc: '085239777888',
+    category: 'Dairy',
+    imageUrl: null,
+  },
+  {
+    id: 'store-brand-peanut-butter',
+    name: 'Creamy Peanut Butter',
+    brand: 'Great Value',
+    sizeQty: 16,
+    sizeUnit: 'oz',
+    upc: '078742999000',
+    category: 'Pantry',
+    imageUrl: null,
+  },
+  {
+    id: 'store-brand-spaghetti',
+    name: 'Spaghetti Pasta',
+    brand: 'Good & Gather',
+    sizeQty: 16,
+    sizeUnit: 'oz',
+    upc: '085239333444',
+    category: 'Pantry',
+    imageUrl: null,
+  },
+  {
+    id: 'store-brand-tomato-sauce',
+    name: 'Tomato Basil Pasta Sauce',
+    brand: 'Great Value',
+    sizeQty: 24,
+    sizeUnit: 'oz',
+    upc: '078742111333',
+    category: 'Pantry',
+    imageUrl: null,
+  },
 ];
 
 const basePrices: Omit<StorePrice, 'capturedAt'>[] = [
@@ -195,7 +317,94 @@ const basePrices: Omit<StorePrice, 'capturedAt'>[] = [
   { storeId: 'kroger-downtown-45202', productId: 'tomato-sauce', price: 8.99, promoPrice: 7.49, source: 'kroger' },
   { storeId: 'target-newport-45202', productId: 'tomato-sauce', price: 8.69, promoPrice: null, source: 'target' },
   { storeId: 'walmart-fort-wright-45202', productId: 'tomato-sauce', price: 7.98, promoPrice: null, source: 'walmart' },
+  { storeId: 'kroger-downtown-45202', productId: 'store-brand-milk-half-gallon', price: 3.99, promoPrice: null, source: 'kroger' },
+  { storeId: 'target-newport-45202', productId: 'store-brand-milk-half-gallon', price: 4.29, promoPrice: null, source: 'target' },
+  { storeId: 'walmart-fort-wright-45202', productId: 'store-brand-milk-half-gallon', price: 3.82, promoPrice: null, source: 'walmart' },
+  { storeId: 'kroger-downtown-45202', productId: 'store-brand-eggs-dozen', price: 3.29, promoPrice: null, source: 'kroger' },
+  { storeId: 'target-newport-45202', productId: 'store-brand-eggs-dozen', price: 3.49, promoPrice: null, source: 'target' },
+  { storeId: 'walmart-fort-wright-45202', productId: 'store-brand-eggs-dozen', price: 3.12, promoPrice: null, source: 'walmart' },
+  { storeId: 'kroger-downtown-45202', productId: 'store-brand-sandwich-bread', price: 2.69, promoPrice: null, source: 'kroger' },
+  { storeId: 'target-newport-45202', productId: 'store-brand-sandwich-bread', price: 2.79, promoPrice: null, source: 'target' },
+  { storeId: 'walmart-fort-wright-45202', productId: 'store-brand-sandwich-bread', price: 2.44, promoPrice: null, source: 'walmart' },
+  { storeId: 'kroger-downtown-45202', productId: 'market-bananas', price: 0.59, promoPrice: null, source: 'kroger' },
+  { storeId: 'target-newport-45202', productId: 'market-bananas', price: 0.55, promoPrice: null, source: 'target' },
+  { storeId: 'walmart-fort-wright-45202', productId: 'market-bananas', price: 0.48, promoPrice: null, source: 'walmart' },
+  { storeId: 'kroger-downtown-45202', productId: 'single-avocados', price: 4.49, promoPrice: null, source: 'kroger' },
+  { storeId: 'target-newport-45202', productId: 'single-avocados', price: 4.19, promoPrice: null, source: 'target' },
+  { storeId: 'walmart-fort-wright-45202', productId: 'single-avocados', price: 3.58, promoPrice: null, source: 'walmart' },
+  { storeId: 'kroger-downtown-45202', productId: 'store-brand-chicken-breast', price: 3.69, promoPrice: null, source: 'kroger' },
+  { storeId: 'target-newport-45202', productId: 'store-brand-chicken-breast', price: 4.59, promoPrice: null, source: 'target' },
+  { storeId: 'walmart-fort-wright-45202', productId: 'store-brand-chicken-breast', price: 3.98, promoPrice: null, source: 'walmart' },
+  { storeId: 'kroger-downtown-45202', productId: 'ground-turkey', price: 4.99, promoPrice: null, source: 'kroger' },
+  { storeId: 'target-newport-45202', productId: 'ground-turkey', price: 5.19, promoPrice: null, source: 'target' },
+  { storeId: 'walmart-fort-wright-45202', productId: 'ground-turkey', price: 4.62, promoPrice: null, source: 'walmart' },
+  { storeId: 'kroger-downtown-45202', productId: 'store-brand-cheddar-shreds', price: 2.79, promoPrice: null, source: 'kroger' },
+  { storeId: 'target-newport-45202', productId: 'store-brand-cheddar-shreds', price: 2.99, promoPrice: null, source: 'target' },
+  { storeId: 'walmart-fort-wright-45202', productId: 'store-brand-cheddar-shreds', price: 2.48, promoPrice: null, source: 'walmart' },
+  { storeId: 'kroger-downtown-45202', productId: 'store-brand-greek-yogurt', price: 4.99, promoPrice: null, source: 'kroger' },
+  { storeId: 'target-newport-45202', productId: 'store-brand-greek-yogurt', price: 4.79, promoPrice: null, source: 'target' },
+  { storeId: 'walmart-fort-wright-45202', productId: 'store-brand-greek-yogurt', price: 4.42, promoPrice: null, source: 'walmart' },
+  { storeId: 'kroger-downtown-45202', productId: 'store-brand-peanut-butter', price: 2.99, promoPrice: null, source: 'kroger' },
+  { storeId: 'target-newport-45202', productId: 'store-brand-peanut-butter', price: 2.89, promoPrice: null, source: 'target' },
+  { storeId: 'walmart-fort-wright-45202', productId: 'store-brand-peanut-butter', price: 2.46, promoPrice: null, source: 'walmart' },
+  { storeId: 'kroger-downtown-45202', productId: 'store-brand-spaghetti', price: 1.49, promoPrice: null, source: 'kroger' },
+  { storeId: 'target-newport-45202', productId: 'store-brand-spaghetti', price: 1.59, promoPrice: null, source: 'target' },
+  { storeId: 'walmart-fort-wright-45202', productId: 'store-brand-spaghetti', price: 1.28, promoPrice: null, source: 'walmart' },
+  { storeId: 'kroger-downtown-45202', productId: 'store-brand-tomato-sauce', price: 3.49, promoPrice: null, source: 'kroger' },
+  { storeId: 'target-newport-45202', productId: 'store-brand-tomato-sauce', price: 3.69, promoPrice: null, source: 'target' },
+  { storeId: 'walmart-fort-wright-45202', productId: 'store-brand-tomato-sauce', price: 2.98, promoPrice: null, source: 'walmart' },
 ];
+
+const swapAlternatives: Record<string, { toProductId: string; reason: SwapSuggestion['reason'] }> = {
+  'whole-milk-half-gallon': { toProductId: 'store-brand-milk-half-gallon', reason: 'cheaper-brand' },
+  'large-eggs-dozen': { toProductId: 'store-brand-eggs-dozen', reason: 'cheaper-brand' },
+  'sandwich-bread': { toProductId: 'store-brand-sandwich-bread', reason: 'cheaper-brand' },
+  'bananas-bunch': { toProductId: 'market-bananas', reason: 'better-unit-price' },
+  'avocados-bag': { toProductId: 'single-avocados', reason: 'better-unit-price' },
+  'chicken-breast': { toProductId: 'store-brand-chicken-breast', reason: 'cheaper-brand' },
+  'ground-beef': { toProductId: 'ground-turkey', reason: 'better-unit-price' },
+  'cheddar-shreds': { toProductId: 'store-brand-cheddar-shreds', reason: 'cheaper-brand' },
+  'greek-yogurt': { toProductId: 'store-brand-greek-yogurt', reason: 'cheaper-brand' },
+  'peanut-butter': { toProductId: 'store-brand-peanut-butter', reason: 'cheaper-brand' },
+  spaghetti: { toProductId: 'store-brand-spaghetti', reason: 'cheaper-brand' },
+  'tomato-sauce': { toProductId: 'store-brand-tomato-sauce', reason: 'cheaper-brand' },
+};
+
+let mockCart: Cart | null = null;
+
+function effectivePrice(price: Omit<StorePrice, 'capturedAt'> | StorePrice) {
+  return price.promoPrice ?? price.price;
+}
+
+function toMoney(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
+function getProduct(productId: string) {
+  return mockProducts.find((product) => product.id === productId);
+}
+
+function createEmptyCart(): Cart {
+  return {
+    id: `mock-cart-${Date.now()}`,
+    status: 'open',
+    items: [],
+  };
+}
+
+function ensureMockCart() {
+  mockCart ??= createEmptyCart();
+  return mockCart;
+}
+
+function cartResponse(cart: Cart) {
+  return {
+    cart: {
+      ...cart,
+      items: cart.items.map((item) => ({ ...item })),
+    },
+  };
+}
 
 export function getMockPrices(storeIds: string[]) {
   const selected = new Set(storeIds);
@@ -230,4 +439,147 @@ export function getMockProductPrices(productId: string, storeIds: string[]) {
   const prices = getMockPrices(storeIds).filter((price) => price.productId === product.id);
 
   return { product, prices };
+}
+
+export function createMockCart() {
+  mockCart = createEmptyCart();
+  return cartResponse(mockCart);
+}
+
+export function getMockCurrentCart() {
+  return cartResponse(ensureMockCart());
+}
+
+export function updateMockCartItem(productId: string, qty: number) {
+  const product = getProduct(productId);
+  if (!product) {
+    throw new Error(`Unknown mock product ${productId}`);
+  }
+
+  const cart = ensureMockCart();
+  if (cart.status === 'finalized') {
+    mockCart = createEmptyCart();
+  }
+
+  const currentCart = ensureMockCart();
+  const existingItem = currentCart.items.find((item) => item.productId === productId);
+  const normalizedQty = Math.max(0, Math.floor(qty));
+
+  if (normalizedQty === 0) {
+    currentCart.items = currentCart.items.filter((item) => item.productId !== productId);
+  } else if (existingItem) {
+    existingItem.qty = normalizedQty;
+  } else {
+    currentCart.items = [...currentCart.items, { productId, qty: normalizedQty, product }];
+  }
+
+  currentCart.status = 'open';
+  return cartResponse(currentCart);
+}
+
+export function finalizeMockCart(storeIds: string[]): CartOptimization {
+  const cart = ensureMockCart();
+  const selectedStoreIds = storeIds.length > 0 ? storeIds : mockStores.map((store) => store.id);
+  const prices = getMockPrices(selectedStoreIds);
+  const priceByProductStore = new Map(
+    prices.map((price) => [`${price.productId}:${price.storeId}`, price]),
+  );
+
+  const perStoreTotals = selectedStoreIds.map((storeId) => {
+    const missingItems: string[] = [];
+    const total = cart.items.reduce((sum, item) => {
+      const price = priceByProductStore.get(`${item.productId}:${storeId}`);
+      if (!price) {
+        missingItems.push(item.productId);
+        return sum;
+      }
+      return sum + effectivePrice(price) * item.qty;
+    }, 0);
+
+    return { storeId, total: toMoney(total), missingItems };
+  });
+
+  const completeStoreTotals = perStoreTotals.filter((storeTotal) => storeTotal.missingItems.length === 0);
+  const rankedStoreTotals = completeStoreTotals.length > 0 ? completeStoreTotals : perStoreTotals;
+  const winningStore =
+    [...rankedStoreTotals].sort((first, second) => first.total - second.total)[0] ??
+    perStoreTotals[0] ??
+    { storeId: selectedStoreIds[0] ?? mockStores[0].id, total: 0, missingItems: [] };
+  const worstStore =
+    [...rankedStoreTotals].sort((first, second) => second.total - first.total)[0] ?? winningStore;
+
+  const cheaperElsewhere = cart.items.flatMap((item) => {
+    const winningPrice = priceByProductStore.get(`${item.productId}:${winningStore.storeId}`);
+    if (!winningPrice) {
+      return [];
+    }
+
+    const cheapestOtherPrice = prices
+      .filter((price) => price.productId === item.productId && price.storeId !== winningStore.storeId)
+      .sort((first, second) => effectivePrice(first) - effectivePrice(second))[0];
+
+    if (!cheapestOtherPrice || effectivePrice(cheapestOtherPrice) >= effectivePrice(winningPrice)) {
+      return [];
+    }
+
+    return [
+      {
+        productId: item.productId,
+        storeId: cheapestOtherPrice.storeId,
+        price: toMoney(effectivePrice(cheapestOtherPrice)),
+        delta: toMoney(effectivePrice(winningPrice) - effectivePrice(cheapestOtherPrice)),
+      },
+    ];
+  });
+
+  const swapSuggestions = cart.items.flatMap((item): SwapSuggestion[] => {
+    const alternative = swapAlternatives[item.productId];
+    if (!alternative) {
+      return [];
+    }
+
+    const currentPrice = priceByProductStore.get(`${item.productId}:${winningStore.storeId}`);
+    const alternativePrice = priceByProductStore.get(`${alternative.toProductId}:${winningStore.storeId}`);
+    if (!currentPrice || !alternativePrice) {
+      return [];
+    }
+
+    const savings = (effectivePrice(currentPrice) - effectivePrice(alternativePrice)) * item.qty;
+    if (savings <= 0) {
+      return [];
+    }
+
+    return [
+      {
+        fromProductId: item.productId,
+        toProductId: alternative.toProductId,
+        savings: toMoney(savings),
+        reason: alternative.reason,
+      },
+    ];
+  });
+
+  const usedPrices = cart.items.flatMap((item) =>
+    selectedStoreIds
+      .map((storeId) => priceByProductStore.get(`${item.productId}:${storeId}`))
+      .filter((price): price is StorePrice => Boolean(price)),
+  );
+  const pricesAsOf =
+    usedPrices
+      .map((price) => price.capturedAt)
+      .sort((first, second) => new Date(first).getTime() - new Date(second).getTime())[0] ??
+    hoursAgo(2);
+
+  cart.status = 'finalized';
+
+  return {
+    winningStoreId: winningStore.storeId,
+    winningTotal: winningStore.total,
+    worstTotal: worstStore.total,
+    savings: toMoney(Math.max(0, worstStore.total - winningStore.total)),
+    perStoreTotals,
+    cheaperElsewhere,
+    swapSuggestions,
+    pricesAsOf,
+  };
 }
