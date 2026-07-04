@@ -1,6 +1,7 @@
 import type { ChainSlug } from "@cartwise/shared";
 
 import { KrogerCollector } from "./kroger.js";
+import { TargetCollector } from "./target.js";
 import type { Collector } from "./types.js";
 
 const collectors = new Map<ChainSlug, Collector | null>();
@@ -22,16 +23,24 @@ export function getCollector(chain: ChainSlug): Collector | null {
 }
 
 function createCollector(chain: ChainSlug): Collector | null {
-  if (chain !== "kroger") {
-    return null;
+  if (chain === "target") {
+    if (process.env.TARGET_DISABLED === "1") {
+      return null;
+    }
+
+    return new TargetCollector();
   }
 
-  try {
-    return new KrogerCollector();
-  } catch (error) {
-    warnMissingCollectorOnce(chain, error);
-    return null;
+  if (chain === "kroger") {
+    try {
+      return new KrogerCollector();
+    } catch (error) {
+      warnMissingCollectorOnce(chain, error);
+      return null;
+    }
   }
+
+  return null;
 }
 
 function warnMissingCollectorOnce(chain: ChainSlug, error?: unknown): void {
