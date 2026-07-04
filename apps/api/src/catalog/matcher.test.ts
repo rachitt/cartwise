@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import type { CollectedProduct } from "../collectors/types.js";
 import type {
+  AlertRow,
+  AlertWithDetails,
   CartwiseDb,
   CartItemRow,
   CartRow,
@@ -12,9 +14,13 @@ import type {
   InsertProductInput,
   LatestProductStorePriceRow,
   ProductRow,
+  PushTokenRow,
   StoreProductWithStore,
   StoreProductRow,
   StoreRow,
+  UpsertWatchInput,
+  WatchRow,
+  WatchWithProduct,
 } from "../db/repository.js";
 import { upsertCollectedProduct } from "./matcher.js";
 
@@ -203,6 +209,50 @@ class FakeCatalogDb implements CartwiseDb {
   }
 
   async getAlternativeProductsByCategory(): Promise<ProductRow[]> {
+    throw new Error("not implemented");
+  }
+
+  async upsertWatch(_input: UpsertWatchInput): Promise<WatchRow> {
+    throw new Error("not implemented");
+  }
+
+  async getActiveWatches(): Promise<WatchWithProduct[]> {
+    throw new Error("not implemented");
+  }
+
+  async listWatchesForDevice(): Promise<WatchWithProduct[]> {
+    throw new Error("not implemented");
+  }
+
+  async updateWatchBaseline(): Promise<void> {
+    throw new Error("not implemented");
+  }
+
+  async deactivateWatchForDevice(): Promise<boolean> {
+    throw new Error("not implemented");
+  }
+
+  async insertAlert(): Promise<AlertRow> {
+    throw new Error("not implemented");
+  }
+
+  async markAlertSent(): Promise<void> {
+    throw new Error("not implemented");
+  }
+
+  async listAlertsForDevice(): Promise<AlertWithDetails[]> {
+    throw new Error("not implemented");
+  }
+
+  async markAlertReadForDevice(): Promise<boolean> {
+    throw new Error("not implemented");
+  }
+
+  async upsertPushToken(): Promise<PushTokenRow> {
+    throw new Error("not implemented");
+  }
+
+  async getPushTokenForDevice(): Promise<PushTokenRow | null> {
     throw new Error("not implemented");
   }
 }

@@ -1,5 +1,6 @@
 import {
   doublePrecision,
+  boolean,
   integer,
   jsonb,
   numeric,
@@ -96,3 +97,41 @@ export const cartItems = pgTable(
   },
   (table) => [unique().on(table.cartId, table.productId)],
 );
+
+export const watches = pgTable(
+  "watches",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    deviceId: text("device_id").notNull(),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id),
+    storeIds: jsonb("store_ids").$type<string[]>().notNull(),
+    baselinePrice: numeric("baseline_price", { mode: "number" }).notNull(),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [unique().on(table.deviceId, table.productId)],
+);
+
+export const alerts = pgTable("alerts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  watchId: uuid("watch_id")
+    .notNull()
+    .references(() => watches.id),
+  storeId: uuid("store_id")
+    .notNull()
+    .references(() => stores.id),
+  oldPrice: numeric("old_price", { mode: "number" }).notNull(),
+  newPrice: numeric("new_price", { mode: "number" }).notNull(),
+  capturedAt: timestamp("captured_at", { withTimezone: true }).notNull(),
+  sentAt: timestamp("sent_at", { withTimezone: true }),
+  read: boolean("read").notNull().default(false),
+});
+
+export const pushTokens = pgTable("push_tokens", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  deviceId: text("device_id").notNull().unique(),
+  expoPushToken: text("expo_push_token").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
