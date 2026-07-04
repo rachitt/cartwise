@@ -35,7 +35,7 @@ export const products = pgTable("products", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
   brand: text("brand"),
-  sizeQty: numeric("size_qty"),
+  sizeQty: numeric("size_qty", { mode: "number" }),
   sizeUnit: text("size_unit"),
   upc: text("upc").unique(),
   category: text("category"),
@@ -62,8 +62,8 @@ export const priceSnapshots = pgTable("price_snapshots", {
   storeProductId: uuid("store_product_id")
     .notNull()
     .references(() => storeProducts.id),
-  price: numeric("price").notNull(),
-  promoPrice: numeric("promo_price"),
+  price: numeric("price", { mode: "number" }).notNull(),
+  promoPrice: numeric("promo_price", { mode: "number" }),
   capturedAt: timestamp("captured_at", { withTimezone: true }).notNull(),
   source: text("source").notNull(),
 });
