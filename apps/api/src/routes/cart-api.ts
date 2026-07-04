@@ -12,6 +12,7 @@ import type {
   StoreRow,
 } from "../db/repository.js";
 import { OptimizerError, optimizeCart, type OptimizerInput } from "../optimizer/optimize.js";
+import { upsertWatchesForFinalizedCart } from "../watch-service.js";
 
 const PRODUCTS_TTL_SECONDS = 6 * 60 * 60;
 const STALE_PRICE_MS = 6 * 60 * 60 * 1_000;
@@ -112,6 +113,14 @@ export const cartApiPlugin: FastifyPluginAsync<CartApiDeps> = async (app, deps) 
       });
 
       await deps.db.finalizeCart(cart.cart.id);
+      await upsertWatchesForFinalizedCart(
+        deps.db,
+        deviceId,
+        cart.items,
+        body.storeIds,
+        latestRows,
+        optimization.winningStoreId,
+      );
       return optimization;
     } catch (error) {
       if (error instanceof OptimizerError) {

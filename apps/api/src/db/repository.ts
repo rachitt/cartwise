@@ -3,7 +3,18 @@ import { and, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 
 import type { CollectedStore } from "../collectors/types.js";
 import { db as drizzleDb } from "./client.js";
-import { cartItems, carts, priceCache, priceSnapshots, products, storeProducts, stores } from "./schema.js";
+import {
+  alerts,
+  cartItems,
+  carts,
+  priceCache,
+  priceSnapshots,
+  products,
+  pushTokens,
+  storeProducts,
+  stores,
+  watches,
+} from "./schema.js";
 
 export interface CacheEntry {
   key: string;
@@ -71,6 +82,44 @@ export interface CartItemWithProduct extends CartItemRow {
   product: ProductRow;
 }
 
+export interface WatchRow {
+  id: string;
+  deviceId: string;
+  productId: string;
+  storeIds: string[];
+  baselinePrice: number;
+  active: boolean;
+  createdAt: Date;
+}
+
+export interface WatchWithProduct extends WatchRow {
+  product: ProductRow;
+}
+
+export interface AlertRow {
+  id: string;
+  watchId: string;
+  storeId: string;
+  oldPrice: number;
+  newPrice: number;
+  capturedAt: Date;
+  sentAt: Date | null;
+  read: boolean;
+}
+
+export interface AlertWithDetails extends AlertRow {
+  watch: WatchRow;
+  product: ProductRow;
+  store: StoreRow;
+}
+
+export interface PushTokenRow {
+  id: string;
+  deviceId: string;
+  expoPushToken: string;
+  updatedAt: Date;
+}
+
 export interface CartWithItems {
   cart: CartRow;
   items: CartItemWithProduct[];
@@ -110,6 +159,21 @@ export interface InsertPriceSnapshotInput {
   source: ChainSlug;
 }
 
+export interface UpsertWatchInput {
+  deviceId: string;
+  productId: string;
+  storeIds: string[];
+  baselinePrice: number;
+}
+
+export interface InsertAlertInput {
+  watchId: string;
+  storeId: string;
+  oldPrice: number;
+  newPrice: number;
+  capturedAt: Date;
+}
+
 export interface CartwiseDb {
   getCacheEntry(key: string): Promise<CacheEntry | null>;
   setCacheEntry(key: string, payload: unknown, expiresAt: Date): Promise<void>;
@@ -144,6 +208,17 @@ export interface CartwiseDb {
     storeIds: string[],
     limit: number,
   ): Promise<ProductRow[]>;
+  upsertWatch(input: UpsertWatchInput): Promise<WatchRow>;
+  getActiveWatches(): Promise<WatchWithProduct[]>;
+  listWatchesForDevice(deviceId: string): Promise<WatchWithProduct[]>;
+  updateWatchBaseline(watchId: string, baselinePrice: number): Promise<void>;
+  deactivateWatchForDevice(deviceId: string, watchId: string): Promise<boolean>;
+  insertAlert(input: InsertAlertInput): Promise<AlertRow>;
+  markAlertSent(alertId: string, sentAt: Date): Promise<void>;
+  listAlertsForDevice(deviceId: string): Promise<AlertWithDetails[]>;
+  markAlertReadForDevice(deviceId: string, alertId: string): Promise<boolean>;
+  upsertPushToken(deviceId: string, expoPushToken: string, updatedAt: Date): Promise<PushTokenRow>;
+  getPushTokenForDevice(deviceId: string): Promise<PushTokenRow | null>;
 }
 
 class DrizzleCartwiseDb implements CartwiseDb {
@@ -425,6 +500,145 @@ class DrizzleCartwiseDb implements CartwiseDb {
     }
 
     return Array.from(deduped.values());
+  }
+
+  async upsertWatch(input: UpsertWatchInput): Promise<WatchRow> {
+    const [row] = await drizzleDb
+      .insert(watches)
+      .values({
+        deviceId: input.deviceId,
+        productId: input.productId,
+        storeIds: input.storeIds,
+        baselinePrice: input.baselinePrice,
+        active: true,
+      })
+      .onConflictDoUpdate({
+        target: [watches.deviceId, watches.productId],
+        set: {
+          storeIds: input.storeIds,
+          baselinePrice: input.baselinePrice,
+          active: true,
+        },
+      })
+      .returning();
+
+    return row as WatchRow;
+  }
+
+  async getActiveWatches(): Promise<WatchWithProduct[]> {
+    const rows = await drizzleDb
+      .select({
+        watch: watches,
+        product: products,
+      })
+      .from(watches)
+      .innerJoin(products, eq(products.id, watches.productId))
+      .where(eq(watches.active, true));
+
+    return rows.map((row) => ({ ...(row.watch as WatchRow), product: row.product as ProductRow }));
+  }
+
+  async listWatchesForDevice(deviceId: string): Promise<WatchWithProduct[]> {
+    const rows = await drizzleDb
+      .select({
+        watch: watches,
+        product: products,
+      })
+      .from(watches)
+      .innerJoin(products, eq(products.id, watches.productId))
+      .where(and(eq(watches.deviceId, deviceId), eq(watches.active, true)))
+      .orderBy(desc(watches.createdAt));
+
+    return rows.map((row) => ({ ...(row.watch as WatchRow), product: row.product as ProductRow }));
+  }
+
+  async updateWatchBaseline(watchId: string, baselinePrice: number): Promise<void> {
+    await drizzleDb.update(watches).set({ baselinePrice }).where(eq(watches.id, watchId));
+  }
+
+  async deactivateWatchForDevice(deviceId: string, watchId: string): Promise<boolean> {
+    const rows = await drizzleDb
+      .update(watches)
+      .set({ active: false })
+      .where(and(eq(watches.id, watchId), eq(watches.deviceId, deviceId)))
+      .returning({ id: watches.id });
+
+    return rows.length > 0;
+  }
+
+  async insertAlert(input: InsertAlertInput): Promise<AlertRow> {
+    const [row] = await drizzleDb.insert(alerts).values(input).returning();
+    return row as AlertRow;
+  }
+
+  async markAlertSent(alertId: string, sentAt: Date): Promise<void> {
+    await drizzleDb.update(alerts).set({ sentAt }).where(eq(alerts.id, alertId));
+  }
+
+  async listAlertsForDevice(deviceId: string): Promise<AlertWithDetails[]> {
+    const rows = await drizzleDb
+      .select({
+        alert: alerts,
+        watch: watches,
+        product: products,
+        store: stores,
+      })
+      .from(alerts)
+      .innerJoin(watches, eq(watches.id, alerts.watchId))
+      .innerJoin(products, eq(products.id, watches.productId))
+      .innerJoin(stores, eq(stores.id, alerts.storeId))
+      .where(eq(watches.deviceId, deviceId))
+      .orderBy(desc(alerts.capturedAt));
+
+    return rows.map((row) => ({
+      ...(row.alert as AlertRow),
+      watch: row.watch as WatchRow,
+      product: row.product as ProductRow,
+      store: row.store as StoreRow,
+    }));
+  }
+
+  async markAlertReadForDevice(deviceId: string, alertId: string): Promise<boolean> {
+    const [owned] = await drizzleDb
+      .select({ id: alerts.id })
+      .from(alerts)
+      .innerJoin(watches, eq(watches.id, alerts.watchId))
+      .where(and(eq(alerts.id, alertId), eq(watches.deviceId, deviceId)))
+      .limit(1);
+
+    if (!owned) {
+      return false;
+    }
+
+    await drizzleDb.update(alerts).set({ read: true }).where(eq(alerts.id, alertId));
+    return true;
+  }
+
+  async upsertPushToken(
+    deviceId: string,
+    expoPushToken: string,
+    updatedAt: Date,
+  ): Promise<PushTokenRow> {
+    const [row] = await drizzleDb
+      .insert(pushTokens)
+      .values({ deviceId, expoPushToken, updatedAt })
+      .onConflictDoUpdate({
+        target: pushTokens.deviceId,
+        set: { expoPushToken, updatedAt },
+      })
+      .returning();
+
+    return row as PushTokenRow;
+  }
+
+  async getPushTokenForDevice(deviceId: string): Promise<PushTokenRow | null> {
+    const [row] = await drizzleDb
+      .select()
+      .from(pushTokens)
+      .where(eq(pushTokens.deviceId, deviceId))
+      .limit(1);
+
+    return (row as PushTokenRow | undefined) ?? null;
   }
 
   private async getActiveCart(deviceId: string): Promise<CartRow | null> {

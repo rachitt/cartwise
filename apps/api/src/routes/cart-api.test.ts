@@ -9,14 +9,20 @@ import type {
   CartRow,
   CartwiseDb,
   FindProductIdentity,
+  AlertRow,
+  AlertWithDetails,
   InsertPriceSnapshotInput,
   InsertProductInput,
   LatestProductStorePriceRow,
   PriceSnapshotRow,
   ProductRow,
+  PushTokenRow,
   StoreProductRow,
   StoreProductWithStore,
   StoreRow,
+  UpsertWatchInput,
+  WatchRow,
+  WatchWithProduct,
 } from "../db/repository.js";
 import { cartApiPlugin } from "./cart-api.js";
 
@@ -106,6 +112,43 @@ describe("cartApiPlugin", () => {
     expect(db.carts[0]?.status).toBe("finalized");
   });
 
+  it("upserts watches for finalized cart items with winning-store baselines", async () => {
+    const db = new FakeCartDb();
+    const cart = await db.getOrCreateActiveCart(deviceId);
+    await db.upsertCartItem(cart.id, milkId, 1);
+    await db.upsertCartItem(cart.id, breadId, 1);
+    db.setPrice(milkId, storeOneId, 2.5);
+    db.setPrice(breadId, storeOneId, 1.5);
+    db.setPrice(milkId, storeTwoId, 3);
+    db.setPrice(breadId, storeTwoId, 2);
+    app = await buildTestApp(db);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/carts/current/finalize",
+      headers: { "x-device-id": deviceId },
+      payload: { storeIds: [storeOneId, storeTwoId] },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(db.watches).toMatchObject([
+      {
+        deviceId,
+        productId: milkId,
+        storeIds: [storeOneId, storeTwoId],
+        baselinePrice: 2.5,
+        active: true,
+      },
+      {
+        deviceId,
+        productId: breadId,
+        storeIds: [storeOneId, storeTwoId],
+        baselinePrice: 1.5,
+        active: true,
+      },
+    ]);
+  });
+
   it("returns 400 when finalizing an empty cart", async () => {
     const db = new FakeCartDb();
     await db.getOrCreateActiveCart(deviceId);
@@ -142,6 +185,7 @@ async function buildTestApp(db: CartwiseDb): Promise<ReturnType<typeof Fastify>>
 class FakeCartDb implements CartwiseDb {
   carts: CartRow[] = [];
   items: CartItemWithProduct[] = [];
+  watches: WatchRow[] = [];
   cacheEntry: CacheEntry | null = null;
   private priceRows = new Map<string, LatestProductStorePriceRow>();
 
@@ -298,6 +342,70 @@ class FakeCartDb implements CartwiseDb {
   }
 
   async getStoreProductsForProduct(): Promise<StoreProductWithStore[]> {
+    throw new Error("not implemented");
+  }
+
+  async upsertWatch(input: UpsertWatchInput): Promise<WatchRow> {
+    const existing = this.watches.find(
+      (watch) => watch.deviceId === input.deviceId && watch.productId === input.productId,
+    );
+    if (existing) {
+      existing.storeIds = input.storeIds;
+      existing.baselinePrice = input.baselinePrice;
+      existing.active = true;
+      return existing;
+    }
+
+    const watch: WatchRow = {
+      id: `watch-${this.watches.length + 1}`,
+      deviceId: input.deviceId,
+      productId: input.productId,
+      storeIds: input.storeIds,
+      baselinePrice: input.baselinePrice,
+      active: true,
+      createdAt: new Date("2026-07-04T12:00:00Z"),
+    };
+    this.watches.push(watch);
+    return watch;
+  }
+
+  async getActiveWatches(): Promise<WatchWithProduct[]> {
+    throw new Error("not implemented");
+  }
+
+  async listWatchesForDevice(): Promise<WatchWithProduct[]> {
+    throw new Error("not implemented");
+  }
+
+  async updateWatchBaseline(): Promise<void> {
+    throw new Error("not implemented");
+  }
+
+  async deactivateWatchForDevice(): Promise<boolean> {
+    throw new Error("not implemented");
+  }
+
+  async insertAlert(): Promise<AlertRow> {
+    throw new Error("not implemented");
+  }
+
+  async markAlertSent(): Promise<void> {
+    throw new Error("not implemented");
+  }
+
+  async listAlertsForDevice(): Promise<AlertWithDetails[]> {
+    throw new Error("not implemented");
+  }
+
+  async markAlertReadForDevice(): Promise<boolean> {
+    throw new Error("not implemented");
+  }
+
+  async upsertPushToken(): Promise<PushTokenRow> {
+    throw new Error("not implemented");
+  }
+
+  async getPushTokenForDevice(): Promise<PushTokenRow | null> {
     throw new Error("not implemented");
   }
 }
