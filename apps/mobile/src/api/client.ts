@@ -3,9 +3,13 @@ import type { CartOptimization, Product, Store, StorePrice } from '@cartwise/sha
 import {
   createMockCart,
   finalizeMockCart,
+  getMockAlerts,
   getMockCurrentCart,
   getMockProductPrices,
   getMockStores,
+  markMockAlertRead,
+  registerMockPushToken,
+  removeMockWatch,
   searchMockProducts,
   updateMockCartItem,
 } from '@/api/mocks';
@@ -19,13 +23,31 @@ export type CartStatus = 'open' | 'finalized';
 export type CartItem = { productId: string; qty: number; product: Product };
 export type Cart = { id: string; status: CartStatus; items: CartItem[] };
 export type CartResponse = { cart: Cart };
+export type PriceAlert = {
+  id: string;
+  productName: string;
+  storeName: string;
+  oldPrice: number;
+  newPrice: number;
+  capturedAt: string;
+  read: boolean;
+};
+export type PriceWatch = {
+  id: string;
+  productName: string;
+  baselinePrice: number;
+  active: boolean;
+  storeIds: string[];
+};
+export type AlertsResponse = { alerts: PriceAlert[]; watches: PriceWatch[] };
+export type PushTokenResponse = { ok: true };
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
 const USE_MOCKS = process.env.EXPO_PUBLIC_USE_MOCKS === '1';
 const REQUEST_TIMEOUT_MS = 4000;
 
 type RequestJsonOptions = {
-  method?: 'GET' | 'POST' | 'PUT';
+  method?: 'DELETE' | 'GET' | 'POST' | 'PUT';
   body?: unknown;
   requiresDeviceId?: boolean;
 };
@@ -75,6 +97,10 @@ async function requestJson<T>(
   } finally {
     clearTimeout(timeout);
   }
+}
+
+export function isUsingMocks() {
+  return USE_MOCKS;
 }
 
 export function getStores(zip: string) {
@@ -131,4 +157,32 @@ export function finalizeCart(storeIds: string[]) {
       requiresDeviceId: true,
     },
   );
+}
+
+export function registerPushToken(expoPushToken: string) {
+  return requestJson<PushTokenResponse>('/push-tokens', registerMockPushToken, {
+    method: 'POST',
+    body: { expoPushToken },
+    requiresDeviceId: true,
+  });
+}
+
+export function getAlerts() {
+  return requestJson<AlertsResponse>('/alerts', getMockAlerts, {
+    requiresDeviceId: true,
+  });
+}
+
+export function markAlertRead(alertId: string) {
+  return requestJson<PriceAlert>(`/alerts/${alertId}/read`, () => markMockAlertRead(alertId), {
+    method: 'PUT',
+    requiresDeviceId: true,
+  });
+}
+
+export function removeWatch(watchId: string) {
+  return requestJson<PushTokenResponse>(`/watches/${watchId}`, () => removeMockWatch(watchId), {
+    method: 'DELETE',
+    requiresDeviceId: true,
+  });
 }
