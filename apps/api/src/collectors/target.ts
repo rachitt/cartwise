@@ -1,11 +1,24 @@
+import { randomBytes } from "node:crypto";
+
 import type { CollectedProduct, CollectedStore, Collector } from "./types.js";
 import { CollectorError } from "./types.js";
 
 const TARGET_BASE_URL = "https://redsky.target.com/redsky_aggregations/v1/web";
+const TARGET_HOME_URL = "https://www.target.com/";
 const DEFAULT_TARGET_API_KEY = "9f36aeafbe60771e321a7cc95a78140772ab3e96";
 const DEFAULT_RATE_LIMIT_BACKOFF_MS = 250;
+const WEB_KEY_CACHE_TTL_MS = 24 * 60 * 60 * 1_000;
+const TARGET_VISITOR_ID = randomBytes(16).toString("hex");
 const TARGET_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+const WEB_KEY_REGEXES = [
+  /"apiKey":"([a-f0-9]{40})"/,
+  /key=([a-f0-9]{40})/,
+  /"key":"([a-f0-9]{40})"/,
+];
+
+let cachedWebKey: string | null = null;
+let cachedWebKeyExpiresAt = 0;
 
 interface TargetCollectorOptions {
   apiKey?: string;
@@ -94,16 +107,13 @@ interface TargetProduct {
 export class TargetCollector implements Collector {
   readonly chain = "target" as const;
 
-  private readonly apiKey: string;
+  private readonly configuredApiKey: string | null;
   private readonly fetchImpl: typeof fetch;
 
   constructor(options: TargetCollectorOptions = {}) {
-    this.apiKey = options.apiKey || process.env.TARGET_API_KEY || DEFAULT_TARGET_API_KEY;
+    this.configuredApiKey =
+      nonEmptyString(options.apiKey) ?? nonEmptyString(process.env.TARGET_API_KEY);
     this.fetchImpl = options.fetch ?? globalThis.fetch;
-
-    if (!this.apiKey) {
-      throw new CollectorError(this.chain, "auth", "Target RedSky API key is not configured");
-    }
 
     if (!this.fetchImpl) {
       throw new Error("TargetCollector requires a fetch implementation");
@@ -112,13 +122,12 @@ export class TargetCollector implements Collector {
 
   async findStores(zip: string): Promise<CollectedStore[]> {
     const params = new URLSearchParams({
-      key: this.apiKey,
       limit: "10",
       within: "20",
       place: zip,
       channel: "WEB",
     });
-    const payload = await this.request<TargetNearbyStoresResponse>(`/nearby_stores_v1?${params}`);
+    const payload = await this.request<TargetNearbyStoresResponse>("/nearby_stores_v1", params);
     const stores = payload.data?.nearby_stores?.stores;
 
     if (!Array.isArray(stores)) {
@@ -130,14 +139,13 @@ export class TargetCollector implements Collector {
 
   async searchProducts(term: string, externalLocationId: string): Promise<CollectedProduct[]> {
     const params = new URLSearchParams({
-      key: this.apiKey,
       keyword: term,
       count: "20",
       offset: "0",
       pricing_store_id: externalLocationId,
       channel: "WEB",
     });
-    const payload = await this.request<TargetSearchResponse>(`/plp_search_v2?${params}`);
+    const payload = await this.request<TargetSearchResponse>("/plp_search_v2", params);
     const products = payload.data?.search?.products;
 
     if (!Array.isArray(products)) {
@@ -172,11 +180,10 @@ export class TargetCollector implements Collector {
     externalLocationId: string,
   ): Promise<TargetProduct | null> {
     const params = new URLSearchParams({
-      key: this.apiKey,
       tcin: externalProductId,
       pricing_store_id: externalLocationId,
     });
-    const payload = await this.request<TargetProductResponse | null>(`/pdp_client_v1?${params}`, {
+    const payload = await this.request<TargetProductResponse | null>("/pdp_client_v1", params, {
       allowNotFound: true,
     });
 
@@ -194,10 +201,14 @@ export class TargetCollector implements Collector {
 
   private async request<T>(
     path: string,
+    params: URLSearchParams,
     options: { allowNotFound?: boolean } = {},
     didRetryRateLimit = false,
+    didRetryAuth = false,
+    forcedApiKey?: string,
   ): Promise<T> {
-    const response = await this.fetchImpl(`${TARGET_BASE_URL}${path}`, {
+    const apiKey = forcedApiKey ?? (await this.resolveApiKey());
+    const response = await this.fetchImpl(this.buildUrl(path, params, apiKey), {
       headers: {
         Accept: "application/json",
         "User-Agent": TARGET_USER_AGENT,
@@ -211,10 +222,28 @@ export class TargetCollector implements Collector {
     if (response.status === 429) {
       if (!didRetryRateLimit) {
         await sleep(getRetryDelayMs(response.headers.get("retry-after")));
-        return this.request<T>(path, options, true);
+        return this.request<T>(path, params, options, true, didRetryAuth, apiKey);
       }
 
       throw new CollectorError(this.chain, "rate-limit", "Target RedSky API rate limit exceeded");
+    }
+
+    if (response.status === 403) {
+      if (didRetryAuth) {
+        throw new CollectorError(this.chain, "auth", "Target RedSky API authentication failed");
+      }
+
+      invalidateTargetWebKeyCache();
+      let refreshedApiKey: string;
+      try {
+        refreshedApiKey = await resolveWebKey(this.fetchImpl, { forceRefresh: true });
+      } catch (error) {
+        throw new CollectorError(this.chain, "auth", "Target RedSky API key refresh failed", {
+          cause: error,
+        });
+      }
+
+      return this.request<T>(path, params, options, false, true, refreshedApiKey);
     }
 
     if (!response.ok) {
@@ -226,6 +255,30 @@ export class TargetCollector implements Collector {
     }
 
     return this.readJson<T>(response);
+  }
+
+  private async resolveApiKey(): Promise<string> {
+    if (this.configuredApiKey) {
+      return this.configuredApiKey;
+    }
+
+    try {
+      return await resolveWebKey(this.fetchImpl);
+    } catch {
+      if (DEFAULT_TARGET_API_KEY) {
+        return DEFAULT_TARGET_API_KEY;
+      }
+
+      throw new CollectorError(this.chain, "auth", "Target RedSky API key is not configured");
+    }
+  }
+
+  private buildUrl(path: string, params: URLSearchParams, apiKey: string): string {
+    const requestParams = new URLSearchParams(params);
+    requestParams.set("key", apiKey);
+    requestParams.set("visitor_id", TARGET_VISITOR_ID);
+
+    return `${TARGET_BASE_URL}${path}?${requestParams}`;
   }
 
   private async readJson<T>(response: Response): Promise<T> {
@@ -305,6 +358,66 @@ export class TargetCollector implements Collector {
   }
 }
 
+export async function resolveWebKey(
+  fetchImpl: typeof fetch = globalThis.fetch,
+  options: { forceRefresh?: boolean } = {},
+): Promise<string> {
+  if (!fetchImpl) {
+    throw new CollectorError("target", "auth", "Target web key fetch requires fetch");
+  }
+
+  if (!options.forceRefresh) {
+    const cached = getCachedWebKey();
+    if (cached) {
+      return cached;
+    }
+  }
+
+  let response: Response;
+  try {
+    response = await fetchImpl(TARGET_HOME_URL, {
+      headers: {
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Cache-Control": "no-cache",
+        "User-Agent": TARGET_USER_AGENT,
+      },
+    });
+  } catch (error) {
+    throw new CollectorError("target", "auth", "Target web key fetch failed", { cause: error });
+  }
+
+  if (!response.ok) {
+    throw new CollectorError(
+      "target",
+      "auth",
+      `Target web key fetch failed with status ${response.status}`,
+    );
+  }
+
+  const html = await response.text();
+  for (const regex of WEB_KEY_REGEXES) {
+    const key = html.match(regex)?.[1];
+
+    if (key) {
+      cachedWebKey = key;
+      cachedWebKeyExpiresAt = Date.now() + WEB_KEY_CACHE_TTL_MS;
+      return key;
+    }
+  }
+
+  throw new CollectorError("target", "auth", "Target web key was not found");
+}
+
+export function invalidateTargetWebKeyCache(): void {
+  cachedWebKey = null;
+  cachedWebKeyExpiresAt = 0;
+}
+
+function getCachedWebKey(): string | null {
+  return cachedWebKey && cachedWebKeyExpiresAt > Date.now() ? cachedWebKey : null;
+}
+
 function mapPrice(price: TargetProduct["price"]): { price: number | null; promoPrice: number | null } {
   const currentRetail = optionalNumber(price?.current_retail);
   const regularRetail = optionalNumber(price?.reg_retail);
@@ -339,6 +452,10 @@ function requiredNumber(value: unknown, field: string): number {
 }
 
 function optionalString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function nonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
