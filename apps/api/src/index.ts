@@ -1,17 +1,31 @@
 import Fastify from "fastify";
 import rateLimit from "@fastify/rate-limit";
 
-const app = Fastify({ logger: true });
+import { getCollector } from "./collectors/registry.js";
+import { cartwiseDb } from "./db/repository.js";
+import { priceApiPlugin } from "./routes/price-api.js";
 
-await app.register(rateLimit, { max: 120, timeWindow: "1 minute" });
+export async function buildApp() {
+  const app = Fastify({ logger: true });
 
-app.get("/health", async () => ({
-  status: "ok",
-  service: "cartwise-price-api",
-}));
+  await app.register(rateLimit, { max: 120, timeWindow: "1 minute" });
 
-const port = Number(process.env.PORT ?? 3000);
-app.listen({ port, host: "0.0.0.0" }).catch((err) => {
-  app.log.error(err);
-  process.exit(1);
-});
+  app.get("/health", async () => ({
+    status: "ok",
+    service: "cartwise-price-api",
+  }));
+
+  await app.register(priceApiPlugin, { db: cartwiseDb, getCollector });
+
+  return app;
+}
+
+if (process.env.NODE_ENV !== "test") {
+  const app = await buildApp();
+  const port = Number(process.env.PORT ?? 3000);
+
+  app.listen({ port, host: "0.0.0.0" }).catch((err) => {
+    app.log.error(err);
+    process.exit(1);
+  });
+}
