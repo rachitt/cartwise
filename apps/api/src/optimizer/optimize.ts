@@ -1,0 +1,301 @@
+import type { CartOptimization, Product, Store, StorePrice, SwapSuggestion } from "@cartwise/shared";
+
+import { toComparableSize } from "../catalog/size.js";
+
+export interface OptimizerInput {
+  items: Array<{ productId: string; qty: number }>;
+  prices: StorePrice[];
+  stores: Store[];
+  alternatives: Record<string, Array<{ product: Product; prices: StorePrice[] }>>;
+}
+
+export class OptimizerError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "OptimizerError";
+  }
+}
+
+interface StoreCandidate {
+  store: Store;
+  totalCents: number;
+  missingItems: string[];
+  usedPrices: StorePrice[];
+}
+
+const MIN_COVERAGE = 0.7;
+const CHEAPER_ELSEWHERE_MIN_CENTS = 30;
+const CHEAPER_ELSEWHERE_MIN_RATIO = 0.05;
+const SWAP_MIN_LINE_SAVINGS_CENTS = 50;
+
+export function optimizeCart(input: OptimizerInput): CartOptimization {
+  const items = input.items.filter((item) => item.qty > 0);
+
+  if (items.length === 0) {
+    throw new OptimizerError("Cart is empty");
+  }
+
+  const priceIndex = indexPrices(input.prices);
+  const candidates = input.stores.map((store) => buildStoreCandidate(store, items, priceIndex));
+  const winningPool = candidates.filter((candidate) => coverage(candidate, items.length) >= MIN_COVERAGE);
+  const eligibleCandidates = winningPool.length > 0 ? winningPool : highestCoverageCandidates(candidates, items.length);
+
+  if (eligibleCandidates.length === 0) {
+    throw new OptimizerError("No selected stores");
+  }
+
+  const winningCandidate = [...eligibleCandidates].sort(compareStoreCandidates)[0];
+  const worstTotalCents = Math.max(...eligibleCandidates.map((candidate) => candidate.totalCents));
+  const savingsCents = Math.max(0, worstTotalCents - winningCandidate.totalCents);
+
+  return {
+    winningStoreId: winningCandidate.store.id,
+    winningTotal: centsToMoney(winningCandidate.totalCents),
+    worstTotal: centsToMoney(worstTotalCents),
+    savings: centsToMoney(savingsCents),
+    perStoreTotals: candidates.map((candidate) => ({
+      storeId: candidate.store.id,
+      total: centsToMoney(candidate.totalCents),
+      missingItems: candidate.missingItems,
+    })),
+    cheaperElsewhere: buildCheaperElsewhere(items, input.stores, winningCandidate.store.id, priceIndex),
+    swapSuggestions: buildSwapSuggestions(items, winningCandidate.store.id, priceIndex, input.alternatives),
+    pricesAsOf: oldestCapturedAt(winningCandidate.usedPrices),
+  };
+}
+
+function buildStoreCandidate(
+  store: Store,
+  items: Array<{ productId: string; qty: number }>,
+  priceIndex: Map<string, StorePrice>,
+): StoreCandidate {
+  let totalCents = 0;
+  const missingItems: string[] = [];
+  const usedPrices: StorePrice[] = [];
+
+  for (const item of items) {
+    const price = priceIndex.get(priceKey(item.productId, store.id));
+
+    if (!price) {
+      missingItems.push(item.productId);
+      continue;
+    }
+
+    totalCents += moneyToCents(effectivePrice(price)) * item.qty;
+    usedPrices.push(price);
+  }
+
+  return { store, totalCents, missingItems, usedPrices };
+}
+
+function compareStoreCandidates(left: StoreCandidate, right: StoreCandidate): number {
+  return (
+    left.totalCents - right.totalCents ||
+    left.missingItems.length - right.missingItems.length ||
+    left.store.name.localeCompare(right.store.name)
+  );
+}
+
+function coverage(candidate: StoreCandidate, itemCount: number): number {
+  return (itemCount - candidate.missingItems.length) / itemCount;
+}
+
+function highestCoverageCandidates(
+  candidates: StoreCandidate[],
+  itemCount: number,
+): StoreCandidate[] {
+  const highestCoverage = Math.max(...candidates.map((candidate) => coverage(candidate, itemCount)));
+  return candidates.filter((candidate) => coverage(candidate, itemCount) === highestCoverage);
+}
+
+function buildCheaperElsewhere(
+  items: Array<{ productId: string; qty: number }>,
+  stores: Store[],
+  winningStoreId: string,
+  priceIndex: Map<string, StorePrice>,
+): CartOptimization["cheaperElsewhere"] {
+  const flags: CartOptimization["cheaperElsewhere"] = [];
+
+  for (const item of items) {
+    const winningPrice = priceIndex.get(priceKey(item.productId, winningStoreId));
+    if (!winningPrice) {
+      continue;
+    }
+
+    const winningPriceCents = moneyToCents(effectivePrice(winningPrice));
+    let best:
+      | {
+          storeId: string;
+          priceCents: number;
+          deltaCents: number;
+        }
+      | null = null;
+
+    for (const store of stores) {
+      if (store.id === winningStoreId) {
+        continue;
+      }
+
+      const price = priceIndex.get(priceKey(item.productId, store.id));
+      if (!price) {
+        continue;
+      }
+
+      const priceCents = moneyToCents(effectivePrice(price));
+      const deltaCents = winningPriceCents - priceCents;
+      const deltaRatio = winningPriceCents === 0 ? 0 : deltaCents / winningPriceCents;
+
+      if (deltaCents < CHEAPER_ELSEWHERE_MIN_CENTS || deltaRatio < CHEAPER_ELSEWHERE_MIN_RATIO) {
+        continue;
+      }
+
+      if (!best || deltaCents > best.deltaCents || (deltaCents === best.deltaCents && store.id < best.storeId)) {
+        best = { storeId: store.id, priceCents, deltaCents };
+      }
+    }
+
+    if (best) {
+      flags.push({
+        productId: item.productId,
+        storeId: best.storeId,
+        price: centsToMoney(best.priceCents),
+        delta: centsToMoney(best.deltaCents),
+      });
+    }
+  }
+
+  return flags;
+}
+
+function buildSwapSuggestions(
+  items: Array<{ productId: string; qty: number }>,
+  winningStoreId: string,
+  priceIndex: Map<string, StorePrice>,
+  alternatives: OptimizerInput["alternatives"],
+): SwapSuggestion[] {
+  const suggestions: SwapSuggestion[] = [];
+
+  for (const item of items) {
+    const original = alternatives[item.productId]?.find(
+      (alternative) => alternative.product.id === item.productId,
+    )?.product;
+    const originalPrice = priceIndex.get(priceKey(item.productId, winningStoreId));
+
+    if (!original || !originalPrice) {
+      continue;
+    }
+
+    const originalSize = toComparableSize(original.sizeQty, original.sizeUnit);
+    if (!originalSize) {
+      continue;
+    }
+
+    const originalUnitPrice = moneyToCents(effectivePrice(originalPrice)) / originalSize.qty;
+    let best:
+      | {
+          toProductId: string;
+          savingsCents: number;
+          reason: SwapSuggestion["reason"];
+        }
+      | null = null;
+
+    for (const alternative of alternatives[item.productId] ?? []) {
+      if (alternative.product.id === item.productId) {
+        continue;
+      }
+
+      const alternativePrice = alternative.prices.find((price) => price.storeId === winningStoreId);
+      if (!alternativePrice) {
+        continue;
+      }
+
+      const alternativeSize = toComparableSize(alternative.product.sizeQty, alternative.product.sizeUnit);
+      if (!alternativeSize || alternativeSize.unit !== originalSize.unit) {
+        continue;
+      }
+
+      const alternativeUnitPrice = moneyToCents(effectivePrice(alternativePrice)) / alternativeSize.qty;
+      const savingsCents = Math.round((originalUnitPrice - alternativeUnitPrice) * originalSize.qty * item.qty);
+
+      if (savingsCents < SWAP_MIN_LINE_SAVINGS_CENTS) {
+        continue;
+      }
+
+      const reason = brandsDiffer(original.brand, alternative.product.brand)
+        ? "cheaper-brand"
+        : "better-unit-price";
+
+      if (
+        !best ||
+        savingsCents > best.savingsCents ||
+        (savingsCents === best.savingsCents && alternative.product.id < best.toProductId)
+      ) {
+        best = {
+          toProductId: alternative.product.id,
+          savingsCents,
+          reason,
+        };
+      }
+    }
+
+    if (best) {
+      suggestions.push({
+        fromProductId: item.productId,
+        toProductId: best.toProductId,
+        savings: centsToMoney(best.savingsCents),
+        reason: best.reason,
+      });
+    }
+  }
+
+  return suggestions;
+}
+
+function indexPrices(prices: StorePrice[]): Map<string, StorePrice> {
+  const index = new Map<string, StorePrice>();
+
+  for (const price of prices) {
+    const key = priceKey(price.productId, price.storeId);
+    const existing = index.get(key);
+
+    if (!existing || new Date(price.capturedAt).getTime() > new Date(existing.capturedAt).getTime()) {
+      index.set(key, price);
+    }
+  }
+
+  return index;
+}
+
+function oldestCapturedAt(prices: StorePrice[]): string {
+  if (prices.length === 0) {
+    return new Date(0).toISOString();
+  }
+
+  return prices
+    .map((price) => price.capturedAt)
+    .sort((left, right) => new Date(left).getTime() - new Date(right).getTime())[0];
+}
+
+function effectivePrice(price: StorePrice): number {
+  return price.promoPrice ?? price.price;
+}
+
+function moneyToCents(value: number): number {
+  return Math.round(value * 100);
+}
+
+function centsToMoney(cents: number): number {
+  return cents / 100;
+}
+
+function priceKey(productId: string, storeId: string): string {
+  return `${productId}:${storeId}`;
+}
+
+function brandsDiffer(left: string | null, right: string | null): boolean {
+  return normalizeBrand(left) !== normalizeBrand(right);
+}
+
+function normalizeBrand(value: string | null): string {
+  return value?.trim().toLowerCase() ?? "";
+}

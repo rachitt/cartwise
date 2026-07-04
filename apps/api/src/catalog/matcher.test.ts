@@ -3,10 +3,14 @@ import { describe, expect, it } from "vitest";
 import type { CollectedProduct } from "../collectors/types.js";
 import type {
   CartwiseDb,
+  CartItemRow,
+  CartRow,
+  CartWithItems,
   CacheEntry,
   FindProductIdentity,
   InsertPriceSnapshotInput,
   InsertProductInput,
+  LatestProductStorePriceRow,
   ProductRow,
   StoreProductWithStore,
   StoreProductRow,
@@ -171,6 +175,34 @@ class FakeCatalogDb implements CartwiseDb {
   }
 
   async getStoreProductsForProduct(): Promise<StoreProductWithStore[]> {
+    throw new Error("not implemented");
+  }
+
+  async getOrCreateActiveCart(): Promise<CartRow> {
+    throw new Error("not implemented");
+  }
+
+  async getActiveCartWithItems(): Promise<CartWithItems | null> {
+    throw new Error("not implemented");
+  }
+
+  async upsertCartItem(): Promise<CartItemRow> {
+    throw new Error("not implemented");
+  }
+
+  async removeCartItem(): Promise<void> {
+    throw new Error("not implemented");
+  }
+
+  async finalizeCart(): Promise<void> {
+    throw new Error("not implemented");
+  }
+
+  async getLatestPricesForProducts(): Promise<LatestProductStorePriceRow[]> {
+    throw new Error("not implemented");
+  }
+
+  async getAlternativeProductsByCategory(): Promise<ProductRow[]> {
     throw new Error("not implemented");
   }
 }

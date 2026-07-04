@@ -3,6 +3,11 @@ export interface ParsedSize {
   sizeUnit: string;
 }
 
+export interface ComparableSize {
+  qty: number;
+  unit: "oz" | "ml" | "floz";
+}
+
 const unitAliases = new Map<string, string>([
   ["ounce", "oz"],
   ["ounces", "oz"],
@@ -58,4 +63,41 @@ export function parseSize(sizeRaw: string | null | undefined): ParsedSize | null
   }
 
   return { sizeQty, sizeUnit };
+}
+
+export function toComparableSize(
+  sizeQty: number | null | undefined,
+  sizeUnit: string | null | undefined,
+): ComparableSize | null {
+  if (!sizeQty || !Number.isFinite(sizeQty) || sizeQty <= 0 || !sizeUnit) {
+    return null;
+  }
+
+  const normalizedUnit = unitAliases.get(sizeUnit.trim().toLowerCase()) ?? sizeUnit.trim().toLowerCase();
+
+  if (normalizedUnit === "oz") {
+    return { qty: sizeQty, unit: "oz" };
+  }
+
+  if (normalizedUnit === "lb") {
+    return { qty: sizeQty * 16, unit: "oz" };
+  }
+
+  if (normalizedUnit === "ml") {
+    return { qty: sizeQty, unit: "ml" };
+  }
+
+  if (normalizedUnit === "l") {
+    return { qty: sizeQty * 1_000, unit: "ml" };
+  }
+
+  if (normalizedUnit === "floz") {
+    return { qty: sizeQty, unit: "floz" };
+  }
+
+  if (normalizedUnit === "gal") {
+    return { qty: sizeQty * 128, unit: "floz" };
+  }
+
+  return null;
 }
