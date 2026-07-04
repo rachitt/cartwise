@@ -4,10 +4,12 @@ import { useMemo } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { useProductPrices, useStores } from '@/api/queries';
+import { useCurrentCart, useProductPrices, useStores, useUpdateCartItem } from '@/api/queries';
+import { CartQuantityStepper } from '@/components/cart-quantity-stepper';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
+import { useTheme } from '@/hooks/use-theme';
 import {
   chainLabel,
   effectivePrice,
@@ -24,10 +26,17 @@ export default function ProductDetailScreen() {
   const selectedStoreIds = usePreferencesStore((state) => state.selectedStoreIds);
   const storesQuery = useStores(zip);
   const productQuery = useProductPrices(productId ?? '', selectedStoreIds);
+  const cartQuery = useCurrentCart();
+  const updateCartItem = useUpdateCartItem();
+  const theme = useTheme();
 
   const storeById = useMemo(
     () => new Map((storesQuery.data?.stores ?? []).map((store) => [store.id, store])),
     [storesQuery.data?.stores],
+  );
+  const cartItem = useMemo(
+    () => cartQuery.data?.cart.items.find((item) => item.productId === productId),
+    [cartQuery.data?.cart.items, productId],
   );
 
   const prices = useMemo(
@@ -72,6 +81,29 @@ export default function ProductDetailScreen() {
                   <ThemedText themeColor="textSecondary">
                     {[product.brand, size, product.category].filter(Boolean).join(' · ')}
                   </ThemedText>
+                  {cartItem ? (
+                    <CartQuantityStepper
+                      qty={cartItem.qty}
+                      disabled={updateCartItem.isPending}
+                      onChange={(qty) => updateCartItem.mutate({ productId: product.id, qty })}
+                    />
+                  ) : (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`Add ${product.name} to cart`}
+                      disabled={updateCartItem.isPending}
+                      onPress={() => updateCartItem.mutate({ productId: product.id, qty: 1 })}
+                      style={({ pressed }) => [
+                        styles.addButton,
+                        { backgroundColor: theme.accent },
+                        pressed && styles.pressed,
+                        updateCartItem.isPending && styles.disabled,
+                      ]}>
+                      <ThemedText type="smallBold" style={styles.addButtonText}>
+                        Add to cart
+                      </ThemedText>
+                    </Pressable>
+                  )}
                 </View>
               </View>
 
@@ -171,6 +203,18 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: Spacing.one,
   },
+  addButton: {
+    minHeight: 44,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'flex-start',
+    paddingHorizontal: Spacing.three,
+    marginTop: Spacing.one,
+  },
+  addButtonText: {
+    color: '#ffffff',
+  },
   priceList: {
     gap: Spacing.three,
   },
@@ -209,5 +253,11 @@ const styles = StyleSheet.create({
   skeletonRow: {
     height: 94,
     borderRadius: 8,
+  },
+  pressed: {
+    opacity: 0.72,
+  },
+  disabled: {
+    opacity: 0.5,
   },
 });
