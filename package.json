@@ -12,5 +12,8 @@
     "test": "npm run test --workspaces --if-present",
     "api": "npm run dev --workspace apps/api",
     "mobile": "npm run start --workspace apps/mobile"
+  },
+  "dependencies": {
+    "expo-notifications": "~57.0.3"
   }
 }
