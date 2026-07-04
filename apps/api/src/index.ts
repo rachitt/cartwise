@@ -3,6 +3,7 @@ import rateLimit from "@fastify/rate-limit";
 
 import { getCollector } from "./collectors/registry.js";
 import { cartwiseDb } from "./db/repository.js";
+import { cartApiPlugin } from "./routes/cart-api.js";
 import { priceApiPlugin } from "./routes/price-api.js";
 
 export async function buildApp() {
@@ -16,6 +17,7 @@ export async function buildApp() {
   }));
 
   await app.register(priceApiPlugin, { db: cartwiseDb, getCollector });
+  await app.register(cartApiPlugin, { db: cartwiseDb, getCollector });
 
   return app;
 }

@@ -1,9 +1,9 @@
 import type { ChainSlug } from "@cartwise/shared";
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 
 import type { CollectedStore } from "../collectors/types.js";
 import { db as drizzleDb } from "./client.js";
-import { priceCache, priceSnapshots, products, storeProducts, stores } from "./schema.js";
+import { cartItems, carts, priceCache, priceSnapshots, products, storeProducts, stores } from "./schema.js";
 
 export interface CacheEntry {
   key: string;
@@ -53,6 +53,38 @@ export interface PriceSnapshotRow {
   source: ChainSlug;
 }
 
+export interface CartRow {
+  id: string;
+  deviceId: string;
+  status: "active" | "finalized";
+  createdAt: Date;
+}
+
+export interface CartItemRow {
+  id: string;
+  cartId: string;
+  productId: string;
+  qty: number;
+}
+
+export interface CartItemWithProduct extends CartItemRow {
+  product: ProductRow;
+}
+
+export interface CartWithItems {
+  cart: CartRow;
+  items: CartItemWithProduct[];
+}
+
+export interface LatestProductStorePriceRow {
+  productId: string;
+  storeId: string;
+  storeProductId: string;
+  externalProductId: string;
+  store: StoreRow;
+  price: PriceSnapshotRow | null;
+}
+
 export interface InsertProductInput {
   name: string;
   brand: string | null;
@@ -97,6 +129,21 @@ export interface CartwiseDb {
     productId: string,
     storeIds: string[],
   ): Promise<StoreProductWithStore[]>;
+  getOrCreateActiveCart(deviceId: string): Promise<CartRow>;
+  getActiveCartWithItems(deviceId: string): Promise<CartWithItems | null>;
+  upsertCartItem(cartId: string, productId: string, qty: number): Promise<CartItemRow>;
+  removeCartItem(cartId: string, productId: string): Promise<void>;
+  finalizeCart(cartId: string): Promise<void>;
+  getLatestPricesForProducts(
+    productIds: string[],
+    storeIds: string[],
+  ): Promise<LatestProductStorePriceRow[]>;
+  getAlternativeProductsByCategory(
+    category: string,
+    excludeProductId: string,
+    storeIds: string[],
+    limit: number,
+  ): Promise<ProductRow[]>;
 }
 
 class DrizzleCartwiseDb implements CartwiseDb {
@@ -227,6 +274,168 @@ class DrizzleCartwiseDb implements CartwiseDb {
       .where(and(eq(storeProducts.productId, productId), inArray(storeProducts.storeId, storeIds)));
 
     return rows as StoreProductWithStore[];
+  }
+
+  async getOrCreateActiveCart(deviceId: string): Promise<CartRow> {
+    const existing = await this.getActiveCart(deviceId);
+    if (existing) {
+      return existing;
+    }
+
+    const [row] = await drizzleDb.insert(carts).values({ deviceId }).returning();
+    return row as CartRow;
+  }
+
+  async getActiveCartWithItems(deviceId: string): Promise<CartWithItems | null> {
+    const cart = await this.getActiveCart(deviceId);
+    if (!cart) {
+      return null;
+    }
+
+    const rows = await drizzleDb
+      .select({
+        id: cartItems.id,
+        cartId: cartItems.cartId,
+        productId: cartItems.productId,
+        qty: cartItems.qty,
+        product: products,
+      })
+      .from(cartItems)
+      .innerJoin(products, eq(products.id, cartItems.productId))
+      .where(eq(cartItems.cartId, cart.id));
+
+    return {
+      cart,
+      items: rows as CartItemWithProduct[],
+    };
+  }
+
+  async upsertCartItem(cartId: string, productId: string, qty: number): Promise<CartItemRow> {
+    const [row] = await drizzleDb
+      .insert(cartItems)
+      .values({ cartId, productId, qty })
+      .onConflictDoUpdate({
+        target: [cartItems.cartId, cartItems.productId],
+        set: { qty },
+      })
+      .returning();
+
+    return row as CartItemRow;
+  }
+
+  async removeCartItem(cartId: string, productId: string): Promise<void> {
+    await drizzleDb
+      .delete(cartItems)
+      .where(and(eq(cartItems.cartId, cartId), eq(cartItems.productId, productId)));
+  }
+
+  async finalizeCart(cartId: string): Promise<void> {
+    await drizzleDb.update(carts).set({ status: "finalized" }).where(eq(carts.id, cartId));
+  }
+
+  async getLatestPricesForProducts(
+    productIds: string[],
+    storeIds: string[],
+  ): Promise<LatestProductStorePriceRow[]> {
+    if (productIds.length === 0 || storeIds.length === 0) {
+      return [];
+    }
+
+    const rows = await drizzleDb
+      .select({
+        productId: storeProducts.productId,
+        storeId: storeProducts.storeId,
+        storeProductId: storeProducts.id,
+        externalProductId: storeProducts.externalProductId,
+        store: stores,
+        priceId: priceSnapshots.id,
+        priceStoreProductId: priceSnapshots.storeProductId,
+        price: priceSnapshots.price,
+        promoPrice: priceSnapshots.promoPrice,
+        capturedAt: priceSnapshots.capturedAt,
+        source: priceSnapshots.source,
+      })
+      .from(storeProducts)
+      .innerJoin(stores, eq(stores.id, storeProducts.storeId))
+      .leftJoin(priceSnapshots, eq(priceSnapshots.storeProductId, storeProducts.id))
+      .where(and(inArray(storeProducts.productId, productIds), inArray(storeProducts.storeId, storeIds)))
+      .orderBy(storeProducts.productId, storeProducts.storeId, desc(priceSnapshots.capturedAt));
+
+    const latest = new Map<string, LatestProductStorePriceRow>();
+
+    for (const row of rows) {
+      const key = `${row.productId}:${row.storeId}`;
+      if (latest.has(key)) {
+        continue;
+      }
+
+      latest.set(key, {
+        productId: row.productId,
+        storeId: row.storeId,
+        storeProductId: row.storeProductId,
+        externalProductId: row.externalProductId,
+        store: row.store as StoreRow,
+        price: row.priceId
+          ? {
+              id: row.priceId,
+              storeProductId: row.priceStoreProductId ?? row.storeProductId,
+              price: row.price ?? 0,
+              promoPrice: row.promoPrice,
+              capturedAt: row.capturedAt ?? new Date(0),
+              source: row.source as ChainSlug,
+            }
+          : null,
+      });
+    }
+
+    return Array.from(latest.values());
+  }
+
+  async getAlternativeProductsByCategory(
+    category: string,
+    excludeProductId: string,
+    storeIds: string[],
+    limit: number,
+  ): Promise<ProductRow[]> {
+    if (storeIds.length === 0 || limit <= 0) {
+      return [];
+    }
+
+    const rows = await drizzleDb
+      .select({ product: products })
+      .from(products)
+      .innerJoin(storeProducts, eq(storeProducts.productId, products.id))
+      .innerJoin(priceSnapshots, eq(priceSnapshots.storeProductId, storeProducts.id))
+      .where(
+        and(
+          eq(products.category, category),
+          ne(products.id, excludeProductId),
+          inArray(storeProducts.storeId, storeIds),
+        ),
+      )
+      .limit(limit * Math.max(storeIds.length, 1) * 4);
+
+    const deduped = new Map<string, ProductRow>();
+    for (const row of rows) {
+      if (deduped.size >= limit) {
+        break;
+      }
+
+      deduped.set(row.product.id, row.product as ProductRow);
+    }
+
+    return Array.from(deduped.values());
+  }
+
+  private async getActiveCart(deviceId: string): Promise<CartRow | null> {
+    const [row] = await drizzleDb
+      .select()
+      .from(carts)
+      .where(and(eq(carts.deviceId, deviceId), eq(carts.status, "active")))
+      .orderBy(desc(carts.createdAt))
+      .limit(1);
+
+    return (row as CartRow | undefined) ?? null;
   }
 }
 

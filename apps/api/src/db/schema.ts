@@ -1,5 +1,6 @@
 import {
   doublePrecision,
+  integer,
   jsonb,
   numeric,
   pgTable,
@@ -73,3 +74,25 @@ export const priceCache = pgTable("price_cache", {
   payload: jsonb("payload").notNull(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
 });
+
+export const carts = pgTable("carts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  deviceId: text("device_id").notNull(),
+  status: text("status").notNull().default("active"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const cartItems = pgTable(
+  "cart_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    cartId: uuid("cart_id")
+      .notNull()
+      .references(() => carts.id),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id),
+    qty: integer("qty").notNull().default(1),
+  },
+  (table) => [unique().on(table.cartId, table.productId)],
+);
