@@ -1,0 +1,16 @@
+{
+  "name": "cartwise",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "api": "npm run dev --workspace apps/api",
+    "mobile": "npm run start --workspace apps/mobile"
+  }
+}

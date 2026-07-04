@@ -1,0 +1,12 @@
+node_modules/
+.env
+.env.*
+!.env.example
+dist/
+build/
+.expo/
+*.tsbuildinfo
+.DS_Store
+coverage/
+drizzle/meta/
+.worktrees/
