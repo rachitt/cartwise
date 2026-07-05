@@ -188,7 +188,7 @@ export default function AlertsScreen() {
                             </ThemedText>
                           </View>
                           <ThemedText type="small" themeColor="textSecondary" style={styles.timeText}>
-                            {formatRelativeTime(alert.capturedAt)}
+                            {formatRelativeTime(alert.capturedAt) ?? 'freshness unknown'}
                           </ThemedText>
                         </ThemedView>
                       </Pressable>

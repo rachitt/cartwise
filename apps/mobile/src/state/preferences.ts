@@ -15,6 +15,11 @@ type PreferencesState = {
   setHasHydrated: (hasHydrated: boolean) => void;
 };
 
+type PersistedPreferencesState = Pick<
+  PreferencesState,
+  'zip' | 'selectedStoreIds' | 'locationConfirmed'
+>;
+
 export const usePreferencesStore = create<PreferencesState>()(
   persist(
     (set) => ({
@@ -38,8 +43,15 @@ export const usePreferencesStore = create<PreferencesState>()(
         selectedStoreIds: state.selectedStoreIds,
         locationConfirmed: state.locationConfirmed,
       }),
-      onRehydrateStorage: () => (state) => {
-        state?.setHasHydrated(true);
+      version: 1,
+      migrate: (persistedState) => persistedState as PersistedPreferencesState,
+      onRehydrateStorage: (state) => (rehydratedState, error) => {
+        if (error || !rehydratedState) {
+          state.setHasHydrated(true);
+          return;
+        }
+
+        rehydratedState.setHasHydrated(true);
       },
     },
   ),
