@@ -35,6 +35,7 @@ export default function SearchScreen() {
   const resetLocation = usePreferencesStore((state) => state.resetLocation);
   const [searchText, setSearchText] = useState('');
   const [submittedSearchText, setSubmittedSearchText] = useState('');
+  const [expandedProductIds, setExpandedProductIds] = useState<Set<string>>(() => new Set());
   const theme = useTheme();
   const storesQuery = useStores(zip);
   const activeStores = useMemo(() => storesQuery.data?.stores ?? [], [storesQuery.data?.stores]);
@@ -76,12 +77,28 @@ export default function SearchScreen() {
 
     setSearchText(trimmed);
     setSubmittedSearchText(trimmed);
+    setExpandedProductIds(new Set<string>());
     Keyboard.dismiss();
   }
 
   function clearSearch() {
     setSearchText('');
     setSubmittedSearchText('');
+    setExpandedProductIds(new Set<string>());
+  }
+
+  function toggleResult(productId: string) {
+    setExpandedProductIds((current) => {
+      const next = new Set(current);
+
+      if (next.has(productId)) {
+        next.delete(productId);
+      } else {
+        next.add(productId);
+      }
+
+      return next;
+    });
   }
 
   return (
@@ -222,19 +239,46 @@ export default function SearchScreen() {
               message="Try a more common item name like milk, eggs, bread, or chicken."
             />
           ) : (
-            <View style={styles.results}>
-              {sortedPricedResults.map((result) => {
+            <ThemedView type="backgroundElement" style={styles.resultsList}>
+              {sortedPricedResults.map((result, index) => {
                 const size = formatProductSize(result.product.sizeQty, result.product.sizeUnit);
                 const cartItem = cartItemByProductId.get(result.product.id);
                 const qty = cartItem?.qty ?? 0;
+                const isExpanded = expandedProductIds.has(result.product.id);
+                const storePriceRows = getStorePriceRows(activeStores, result.prices);
+                const cheapest = storePriceRows[0];
+                const mostExpensive = storePriceRows[storePriceRows.length - 1];
+                const savings =
+                  cheapest && mostExpensive
+                    ? effectivePrice(mostExpensive.price) - effectivePrice(cheapest.price)
+                    : 0;
+                const cheapestPriceLabel = cheapest ? formatPrice(effectivePrice(cheapest.price)) : null;
+                const priceDetail = cheapest
+                  ? ` at ${cheapest.store.name}${
+                      storePriceRows.length >= 2 ? ` · saves ${formatPrice(savings)}` : ''
+                    }`
+                  : 'Price unavailable';
+                const metaLabel = [result.product.brand || 'Brand unavailable', size]
+                  .filter(Boolean)
+                  .join(' · ');
 
                 return (
-                  <ThemedView
+                  <View
                     key={result.product.id}
-                    type="backgroundElement"
-                    style={styles.resultCard}>
-                    <View style={styles.productHeader}>
-                      <View style={styles.productImage}>
+                    style={[
+                      styles.resultItem,
+                      { borderBottomColor: theme.border },
+                      index === sortedPricedResults.length - 1 && styles.lastResultItem,
+                    ]}>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`${
+                        isExpanded ? 'Hide' : 'Show'
+                      } store prices for ${result.product.name}`}
+                      accessibilityState={{ expanded: isExpanded }}
+                      onPress={() => toggleResult(result.product.id)}
+                      style={({ pressed }) => [styles.resultToggle, pressed && styles.pressed]}>
+                      <View style={[styles.productImage, { backgroundColor: theme.accentMuted }]}>
                         {result.product.imageUrl ? (
                           <Image source={result.product.imageUrl} style={styles.image} />
                         ) : (
@@ -244,43 +288,72 @@ export default function SearchScreen() {
                         )}
                       </View>
                       <View style={styles.resultCopy}>
-                        <ThemedText type="smallBold" numberOfLines={2}>
+                        <ThemedText type="smallBold" numberOfLines={1}>
                           {result.product.name}
                         </ThemedText>
                         <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
-                          {result.product.brand || 'Brand unavailable'}
+                          {metaLabel}
                         </ThemedText>
-                        {size ? (
-                          <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
-                            {size}
+                        <ThemedText
+                          type="smallBold"
+                          numberOfLines={1}
+                          style={styles.compactPriceLine}>
+                          {cheapestPriceLabel ? (
+                            <ThemedText
+                              type="smallBold"
+                              themeColor="accent"
+                              style={styles.compactPriceLine}>
+                              {cheapestPriceLabel}
+                            </ThemedText>
+                          ) : null}
+                          {priceDetail}
+                        </ThemedText>
+                        {cheapest ? (
+                          <ThemedText
+                            type="small"
+                            themeColor="textSecondary"
+                            numberOfLines={1}
+                            style={styles.compactFreshness}>
+                            {formatFreshnessStamp(cheapest.price.capturedAt)}
                           </ThemedText>
                         ) : null}
                       </View>
-                      <AddToCartControl
-                        disabled={updateCartItem.isPending}
-                        productId={result.product.id}
-                        productName={result.product.name}
-                        qty={qty}
-                        onChange={(nextQty) =>
-                          updateCartItem.mutate({ productId: result.product.id, qty: nextQty })
-                        }
-                      />
-                    </View>
-
-                    <View style={styles.priceTable}>
-                      <ThemedText type="smallBold">Store prices</ThemedText>
-                      {getStorePriceRows(activeStores, result.prices).map(({ store, price }) => (
-                        <StorePriceRow
-                          key={`${result.product.id}-${store.id}`}
-                          price={price}
-                          store={store}
+                      <View style={styles.resultActions}>
+                        <AddToCartControl
+                          disabled={updateCartItem.isPending}
+                          productId={result.product.id}
+                          productName={result.product.name}
+                          qty={qty}
+                          onChange={(nextQty) =>
+                            updateCartItem.mutate({ productId: result.product.id, qty: nextQty })
+                          }
                         />
-                      ))}
-                    </View>
-                  </ThemedView>
+                        <ThemedText
+                          type="smallBold"
+                          themeColor="textSecondary"
+                          style={[styles.chevron, isExpanded && styles.chevronExpanded]}>
+                          {'>'}
+                        </ThemedText>
+                      </View>
+                    </Pressable>
+
+                    {isExpanded ? (
+                      <View style={[styles.priceTable, { borderTopColor: theme.border }]}>
+                        {storePriceRows.map(({ store, price }, priceIndex) => (
+                          <StorePriceRow
+                            key={`${result.product.id}-${store.id}`}
+                            isLowest={priceIndex === 0}
+                            price={price}
+                            showSeparator={priceIndex < storePriceRows.length - 1}
+                            store={store}
+                          />
+                        ))}
+                      </View>
+                    ) : null}
+                  </View>
                 );
               })}
-            </View>
+            </ThemedView>
           )}
         </ScrollView>
       </SafeAreaView>
@@ -288,9 +361,27 @@ export default function SearchScreen() {
   );
 }
 
-function StorePriceRow({ store, price }: { store: Store; price: StorePrice }) {
+function StorePriceRow({
+  isLowest = false,
+  price,
+  showSeparator = false,
+  store,
+}: {
+  isLowest?: boolean;
+  price: StorePrice;
+  showSeparator?: boolean;
+  store: Store;
+}) {
+  const theme = useTheme();
+
   return (
-    <View style={styles.priceRow}>
+    <View
+      style={[
+        styles.priceRow,
+        isLowest && { backgroundColor: theme.accentMuted },
+        showSeparator && { borderBottomColor: theme.border },
+        showSeparator && styles.priceRowSeparator,
+      ]}>
       <View style={styles.priceStore}>
         <ThemedText type="smallBold" numberOfLines={1}>
           {store.name}
@@ -301,7 +392,16 @@ function StorePriceRow({ store, price }: { store: Store; price: StorePrice }) {
         </ThemedText>
       </View>
       <View style={styles.priceMeta}>
-        <ThemedText type="smallBold">{formatPrice(effectivePrice(price))}</ThemedText>
+        <View style={styles.priceAmountRow}>
+          <ThemedText type="smallBold" themeColor={isLowest ? 'accent' : 'text'}>
+            {formatPrice(effectivePrice(price))}
+          </ThemedText>
+          {isLowest ? (
+            <ThemedText type="smallBold" themeColor="accent" style={styles.lowestMarker}>
+              lowest
+            </ThemedText>
+          ) : null}
+        </View>
         <ThemedText type="small" themeColor="textSecondary">
           {formatFreshnessStamp(price.capturedAt)}
         </ThemedText>
@@ -326,7 +426,11 @@ function AddToCartControl({
   const theme = useTheme();
 
   if (qty > 0) {
-    return <CartQuantityStepper compact qty={qty} disabled={disabled} onChange={onChange} />;
+    return (
+      <View onTouchEnd={(event) => event.stopPropagation()}>
+        <CartQuantityStepper compact qty={qty} disabled={disabled} onChange={onChange} />
+      </View>
+    );
   }
 
   return (
@@ -517,58 +621,93 @@ const styles = StyleSheet.create({
   resultsHeader: {
     gap: Spacing.one,
   },
-  results: {
-    gap: Spacing.three,
-  },
-  resultCard: {
+  resultsList: {
     borderRadius: 8,
-    padding: Spacing.three,
-    gap: Spacing.three,
+    overflow: 'hidden',
   },
-  productHeader: {
-    minHeight: 74,
+  resultItem: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  lastResultItem: {
+    borderBottomWidth: 0,
+  },
+  resultToggle: {
+    minHeight: 92,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.three,
+    gap: Spacing.two,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
   },
   productImage: {
-    width: 68,
-    height: 68,
+    width: 48,
+    height: 48,
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(22, 163, 74, 0.1)',
   },
   image: {
-    width: 68,
-    height: 68,
+    width: 48,
+    height: 48,
     borderRadius: 8,
   },
   resultCopy: {
     flex: 1,
     minWidth: 0,
-    gap: Spacing.one,
+    gap: Spacing.half,
+  },
+  compactPriceLine: {
+    fontSize: 15,
+    lineHeight: 20,
+  },
+  compactFreshness: {
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  resultActions: {
+    flexShrink: 0,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    gap: Spacing.two,
   },
   addButton: {
-    minHeight: 40,
-    minWidth: 64,
+    minHeight: 36,
+    minWidth: 60,
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: Spacing.three,
+    paddingHorizontal: Spacing.two,
   },
   addButtonText: {
     color: '#ffffff',
   },
+  chevron: {
+    width: 24,
+    height: 24,
+    lineHeight: 24,
+    textAlign: 'center',
+    transform: [{ rotate: '90deg' }],
+  },
+  chevronExpanded: {
+    transform: [{ rotate: '-90deg' }],
+  },
   priceTable: {
-    gap: Spacing.two,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
   },
   priceRow: {
-    minHeight: 48,
+    minHeight: 58,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: Spacing.two,
+    borderRadius: 6,
+    paddingHorizontal: Spacing.two,
+    paddingVertical: Spacing.two,
+  },
+  priceRowSeparator: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   priceStore: {
     flex: 1,
@@ -576,14 +715,25 @@ const styles = StyleSheet.create({
     gap: Spacing.half,
   },
   priceMeta: {
-    minWidth: 92,
+    minWidth: 112,
     alignItems: 'flex-end',
+    gap: Spacing.half,
+  },
+  priceAmountRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: Spacing.one,
+  },
+  lowestMarker: {
+    fontSize: 11,
+    lineHeight: 14,
   },
   skeletonStack: {
     gap: Spacing.three,
   },
   skeletonCard: {
-    height: 172,
+    height: 92,
     borderRadius: 8,
     opacity: 0.7,
   },
