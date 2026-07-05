@@ -3,7 +3,7 @@ import Fastify from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createCache, type CacheDb } from "../cache.js";
-import type { Collector, CollectedStore } from "../collectors/types.js";
+import type { CollectedProduct, Collector, CollectedStore } from "../collectors/types.js";
 import type { CacheEntry, CartwiseDb } from "../db/repository.js";
 import { priceApiPlugin } from "./price-api.js";
 
@@ -205,6 +205,57 @@ describe("priceApiPlugin collector degradation", () => {
       ],
     });
   });
+
+  it("serves cached product prices without inserting snapshots", async () => {
+    const now = new Date("2026-07-04T12:00:00Z");
+    const productId = "00000000-0000-4000-8000-000000000001";
+    const storeId = "10000000-0000-4000-8000-000000000001";
+    const externalProductId = "external-product-1";
+    const db = fakeProductPricesDb({
+      productId,
+      storeId,
+      externalProductId,
+      cachedProducts: [
+        {
+          externalProductId,
+          name: "Cached Milk",
+          brand: "Store",
+          sizeRaw: "1 gal",
+          upc: null,
+          category: "dairy",
+          imageUrl: null,
+          price: 3.49,
+          promoPrice: null,
+          capturedAt: new Date("2026-07-04T11:55:00Z"),
+        },
+      ],
+      now,
+    });
+    app = Fastify();
+    await app.register(priceApiPlugin, {
+      db,
+      getCollector: () => throwingCollector("kroger"),
+      cache: createCache(db, () => now),
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/products/${productId}/prices?storeIds=${storeId}`,
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().prices).toEqual([
+      {
+        storeId,
+        productId,
+        price: 3.49,
+        promoPrice: null,
+        capturedAt: "2026-07-04T11:55:00.000Z",
+        source: "kroger",
+      },
+    ]);
+    expect(db.snapshotInserts).toBe(0);
+  });
 });
 
 function throwingDb(): CartwiseDb {
@@ -310,4 +361,90 @@ function fakePriceDb(initialCache: Record<string, CachedValue> = {}): CartwiseDb
   });
 
   return proxied as CartwiseDb & CacheDb;
+}
+
+function fakeProductPricesDb(input: {
+  productId: string;
+  storeId: string;
+  externalProductId: string;
+  cachedProducts: CollectedProduct[];
+  now: Date;
+}): CartwiseDb & CacheDb & { snapshotInserts: number } {
+  const store = {
+    id: input.storeId,
+    chainSlug: "kroger" as const,
+    externalLocationId: "external-store-1",
+    name: "Kroger",
+    address: "1 Main St",
+    zip: "45202",
+    lat: 39.1,
+    lng: -84.5,
+  };
+  const product = {
+    id: input.productId,
+    name: "Milk",
+    brand: "Store",
+    sizeQty: 1,
+    sizeUnit: "gal",
+    upc: null,
+    category: "dairy",
+    imageUrl: null,
+  };
+  const cacheKey = `price:kroger:${store.externalLocationId}:${input.externalProductId}`;
+  const cacheEntries = new Map<string, CacheEntry>([
+    [
+      cacheKey,
+      {
+        key: cacheKey,
+        payload: { v: input.cachedProducts, storedAt: input.now.toISOString() },
+        expiresAt: new Date(input.now.getTime() + 60_000),
+      },
+    ],
+  ]);
+
+  const target = {
+    snapshotInserts: 0,
+    async getCacheEntry(key: string) {
+      return cacheEntries.get(key) ?? null;
+    },
+    async setCacheEntry(key: string, payload: unknown, expiresAt: Date) {
+      cacheEntries.set(key, { key, payload, expiresAt });
+    },
+    async getProductById(id: string) {
+      return id === product.id ? product : null;
+    },
+    async getStoreProductsForProduct(productId: string, storeIds: string[]) {
+      if (productId !== product.id || !storeIds.includes(store.id)) {
+        return [];
+      }
+
+      return [
+        {
+          id: "store-product-1",
+          productId: product.id,
+          storeId: store.id,
+          externalProductId: input.externalProductId,
+          store,
+        },
+      ];
+    },
+    async insertPriceSnapshot() {
+      this.snapshotInserts += 1;
+      throw new Error("Snapshot insert should not be called on a cache hit");
+    },
+  };
+
+  const proxied = new Proxy(target, {
+    get(targetObject, property) {
+      if (property in targetObject) {
+        return targetObject[property as keyof typeof targetObject];
+      }
+
+      return async () => {
+        throw new Error(`Unexpected DB call: ${String(property)}`);
+      };
+    },
+  });
+
+  return proxied as unknown as CartwiseDb & CacheDb & { snapshotInserts: number };
 }

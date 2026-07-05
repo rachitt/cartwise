@@ -28,7 +28,9 @@ function baselineForProduct(
   rows: LatestProductStorePriceRow[],
   winningStoreId: string,
 ): number | null {
-  const productRows = rows.filter((row) => row.productId === productId && row.price);
+  const productRows = rows.filter(
+    (row) => row.productId === productId && row.price !== null && row.price.price !== null,
+  );
   const winningRow = productRows.find((row) => row.storeId === winningStoreId);
   if (winningRow?.price) {
     return effectivePrice(winningRow.price);
@@ -42,6 +44,6 @@ function baselineForProduct(
   return cheapest ?? null;
 }
 
-function effectivePrice(price: { price: number; promoPrice: number | null }): number {
-  return price.promoPrice ?? price.price;
+function effectivePrice(price: { price: number | null; promoPrice: number | null }): number {
+  return price.promoPrice ?? price.price ?? Number.POSITIVE_INFINITY;
 }

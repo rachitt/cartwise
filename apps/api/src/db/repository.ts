@@ -58,7 +58,7 @@ export interface StoreProductWithStore extends StoreProductRow {
 export interface PriceSnapshotRow {
   id: string;
   storeProductId: string;
-  price: number;
+  price: number | null;
   promoPrice: number | null;
   capturedAt: Date;
   source: ChainSlug;
@@ -302,8 +302,62 @@ class DrizzleCartwiseDb implements CartwiseDb {
   }
 
   async insertProduct(input: InsertProductInput): Promise<ProductRow> {
-    const [row] = await drizzleDb.insert(products).values(input).returning();
-    return row as ProductRow;
+    if (input.upc) {
+      const [inserted] = await drizzleDb
+        .insert(products)
+        .values(input)
+        .onConflictDoNothing({ target: products.upc })
+        .returning();
+
+      if (inserted) {
+        return inserted as ProductRow;
+      }
+
+      const existing = await this.findProductByUpc(input.upc);
+      if (existing) {
+        return existing;
+      }
+
+      throw new Error("Product UPC conflict could not be resolved");
+    }
+
+    return drizzleDb.transaction(async (tx) => {
+      const identity = productIdentityFromInput(input);
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtext('cartwise.products'), hashtext(${productIdentityLockKey(identity)}))`,
+      );
+
+      const [existing] = await tx
+        .select()
+        .from(products)
+        .where(and(...productIdentityConditions(identity)))
+        .limit(1);
+
+      if (existing) {
+        return existing as ProductRow;
+      }
+
+      try {
+        const [row] = await tx.insert(products).values(input).returning();
+        return row as ProductRow;
+      } catch (error) {
+        if (!isUniqueViolation(error)) {
+          throw error;
+        }
+
+        const [conflicting] = await tx
+          .select()
+          .from(products)
+          .where(and(...productIdentityConditions(identity)))
+          .limit(1);
+
+        if (conflicting) {
+          return conflicting as ProductRow;
+        }
+
+        throw error;
+      }
+    });
   }
 
   async upsertStoreProduct(
@@ -454,7 +508,7 @@ class DrizzleCartwiseDb implements CartwiseDb {
           ? {
               id: row.priceId,
               storeProductId: row.priceStoreProductId ?? row.storeProductId,
-              price: row.price ?? 0,
+              price: row.price,
               promoPrice: row.promoPrice,
               capturedAt: row.capturedAt ?? new Date(0),
               source: row.source as ChainSlug,
@@ -657,4 +711,42 @@ export const cartwiseDb: CartwiseDb = new DrizzleCartwiseDb();
 
 function normalizeIdentity(value: string): string {
   return value.trim().toLowerCase();
+}
+
+function productIdentityFromInput(input: InsertProductInput): FindProductIdentity {
+  return {
+    name: input.name,
+    brand: input.brand,
+    sizeQty: input.sizeQty,
+    sizeUnit: input.sizeUnit,
+  };
+}
+
+function productIdentityConditions(identity: FindProductIdentity) {
+  return [
+    sql`lower(trim(${products.name})) = ${normalizeIdentity(identity.name)}`,
+    identity.brand === null
+      ? isNull(products.brand)
+      : sql`lower(trim(${products.brand})) = ${normalizeIdentity(identity.brand)}`,
+    identity.sizeQty === null ? isNull(products.sizeQty) : eq(products.sizeQty, identity.sizeQty),
+    identity.sizeUnit === null ? isNull(products.sizeUnit) : eq(products.sizeUnit, identity.sizeUnit),
+  ];
+}
+
+function productIdentityLockKey(identity: FindProductIdentity): string {
+  return [
+    normalizeIdentity(identity.name),
+    identity.brand === null ? "" : normalizeIdentity(identity.brand),
+    identity.sizeQty ?? "",
+    identity.sizeUnit ?? "",
+  ].join("|");
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "23505"
+  );
 }

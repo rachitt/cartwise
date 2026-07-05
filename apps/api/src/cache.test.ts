@@ -37,6 +37,36 @@ describe("createCache", () => {
     });
   });
 
+  it("deduplicates concurrent misses for the same key", async () => {
+    const now = new Date("2026-07-04T12:00:00Z");
+    const db = fakeCacheDb(null);
+    let resolveLoader: (value: { ok: true }) => void = () => {
+      throw new Error("Loader did not start");
+    };
+    let loaderStart: () => void = () => {};
+    const loaderStarted = new Promise<void>((resolve) => {
+      loaderStart = resolve;
+    });
+    const loader = vi.fn(async () => {
+      loaderStart();
+      return new Promise<{ ok: true }>((resolve) => {
+        resolveLoader = resolve;
+      });
+    });
+
+    const cache = createCache(db, () => now);
+    const first = cache.withCacheMeta("same", 60, loader);
+    const second = cache.withCacheMeta("same", 60, loader);
+
+    await loaderStarted;
+    expect(loader).toHaveBeenCalledTimes(1);
+    resolveLoader({ ok: true });
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      { value: { ok: true }, fresh: true, capturedAt: now },
+      { value: { ok: true }, fresh: true, capturedAt: now },
+    ]);
+  });
+
   it("returns stale payload when the loader fails", async () => {
     const db = fakeCacheDb({
       key: "stale",

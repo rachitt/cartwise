@@ -141,7 +141,11 @@ async function refreshStalePrices(
   now: Date,
 ): Promise<void> {
   for (const row of rows) {
-    if (row.price && now.getTime() - row.price.capturedAt.getTime() < STALE_PRICE_MS) {
+    if (
+      row.price &&
+      row.price.price !== null &&
+      now.getTime() - row.price.capturedAt.getTime() < STALE_PRICE_MS
+    ) {
       continue;
     }
 
@@ -151,27 +155,30 @@ async function refreshStalePrices(
     }
 
     try {
-      const collectedProducts = await cache.withCache(
+      await cache.withCache(
         `price:${row.store.chainSlug}:${row.store.externalLocationId}:${row.externalProductId}`,
         PRODUCTS_TTL_SECONDS,
-        () => collector.getPrices([row.externalProductId], row.store.externalLocationId),
+        async () => {
+          const collectedProducts = (
+            await collector.getPrices([row.externalProductId], row.store.externalLocationId)
+          ).map(normalizeCollectedProductDates);
+          const collected = collectedProducts.find(
+            (product) => product.externalProductId === row.externalProductId,
+          );
+
+          if (collected && collected.price !== null) {
+            await db.insertPriceSnapshot({
+              storeProductId: row.storeProductId,
+              price: collected.price,
+              promoPrice: collected.promoPrice,
+              capturedAt: collected.capturedAt,
+              source: row.store.chainSlug,
+            });
+          }
+
+          return collectedProducts;
+        },
       );
-
-      const collected = collectedProducts
-        .map(normalizeCollectedProductDates)
-        .find((product) => product.externalProductId === row.externalProductId);
-
-      if (!collected || collected.price === null) {
-        continue;
-      }
-
-      await db.insertPriceSnapshot({
-        storeProductId: row.storeProductId,
-        price: collected.price,
-        promoPrice: collected.promoPrice,
-        capturedAt: collected.capturedAt,
-        source: row.store.chainSlug,
-      });
     } catch {
       continue;
     }
@@ -222,7 +229,7 @@ function groupPricesByProduct(prices: StorePrice[]): Map<string, StorePrice[]> {
 
 function latestRowsToStorePrices(rows: LatestProductStorePriceRow[]): StorePrice[] {
   return rows.flatMap((row) =>
-    row.price
+    row.price && row.price.price !== null
       ? [
           {
             productId: row.productId,

@@ -1,6 +1,7 @@
 import {
   doublePrecision,
   boolean,
+  index,
   integer,
   jsonb,
   numeric,
@@ -59,16 +60,25 @@ export const storeProducts = pgTable(
   (table) => [unique().on(table.storeId, table.externalProductId)],
 );
 
-export const priceSnapshots = pgTable("price_snapshots", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  storeProductId: uuid("store_product_id")
-    .notNull()
-    .references(() => storeProducts.id),
-  price: numeric("price", { mode: "number" }).notNull(),
-  promoPrice: numeric("promo_price", { mode: "number" }),
-  capturedAt: timestamp("captured_at", { withTimezone: true }).notNull(),
-  source: text("source").notNull(),
-});
+export const priceSnapshots = pgTable(
+  "price_snapshots",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    storeProductId: uuid("store_product_id")
+      .notNull()
+      .references(() => storeProducts.id),
+    price: numeric("price", { mode: "number" }).notNull(),
+    promoPrice: numeric("promo_price", { mode: "number" }),
+    capturedAt: timestamp("captured_at", { withTimezone: true }).notNull(),
+    source: text("source").notNull(),
+  },
+  (table) => [
+    index("price_snapshots_store_product_captured_at_idx").on(
+      table.storeProductId,
+      table.capturedAt.desc(),
+    ),
+  ],
+);
 
 export const priceCache = pgTable("price_cache", {
   key: text("key").primaryKey(),
