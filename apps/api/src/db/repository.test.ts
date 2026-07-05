@@ -59,6 +59,30 @@ const { fakeDb, fakeState } = vi.hoisted(() => {
         },
       };
     },
+    update() {
+      let setValues: Partial<ProductRow> | null = null;
+
+      return {
+        set(values: Partial<ProductRow>) {
+          setValues = values;
+          return this;
+        },
+        where() {
+          return this;
+        },
+        async returning() {
+          const updated: ProductRow[] = [];
+          for (const [upc, row] of fakeState.rowsByUpc) {
+            if (row.imageUrl === null && setValues?.imageUrl) {
+              const next = { ...row, ...setValues };
+              fakeState.rowsByUpc.set(upc, next);
+              updated.push(next);
+            }
+          }
+          return updated.slice(0, 1);
+        },
+      };
+    },
     async transaction<T>(this: unknown, callback: (tx: unknown) => Promise<T>): Promise<T> {
       return callback(this);
     },
@@ -99,5 +123,48 @@ describe("cartwiseDb.insertProduct", () => {
     expect(first).toEqual(second);
     expect(fakeState.rowsByUpc.size).toBe(1);
     expect(fakeState.insertAttempts).toBe(2);
+  });
+
+  it("backfills a missing image when a later collection carries one", async () => {
+    const input: InsertProductInput = {
+      name: "Whole Milk",
+      brand: "Store",
+      sizeQty: 1,
+      sizeUnit: "gal",
+      upc: "000111222333",
+      category: "dairy",
+      imageUrl: null,
+    };
+
+    await cartwiseDb.insertProduct(input);
+    const result = await cartwiseDb.insertProduct({
+      ...input,
+      imageUrl: "https://img.example/milk.jpg",
+    });
+
+    expect(result.imageUrl).toBe("https://img.example/milk.jpg");
+    expect(fakeState.rowsByUpc.get(input.upc as string)?.imageUrl).toBe(
+      "https://img.example/milk.jpg",
+    );
+  });
+
+  it("never overwrites an existing product image", async () => {
+    const input: InsertProductInput = {
+      name: "Whole Milk",
+      brand: "Store",
+      sizeQty: 1,
+      sizeUnit: "gal",
+      upc: "000111222333",
+      category: "dairy",
+      imageUrl: "https://img.example/original.jpg",
+    };
+
+    await cartwiseDb.insertProduct(input);
+    const result = await cartwiseDb.insertProduct({
+      ...input,
+      imageUrl: "https://img.example/other.jpg",
+    });
+
+    expect(result.imageUrl).toBe("https://img.example/original.jpg");
   });
 });

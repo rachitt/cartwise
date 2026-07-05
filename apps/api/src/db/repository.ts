@@ -319,7 +319,7 @@ class DrizzleCartwiseDb implements CartwiseDb {
 
       const existing = await this.findProductByUpc(input.upc);
       if (existing) {
-        return existing;
+        return backfillProductImage(drizzleDb, existing, input.imageUrl);
       }
 
       throw new Error("Product UPC conflict could not be resolved");
@@ -338,7 +338,7 @@ class DrizzleCartwiseDb implements CartwiseDb {
         .limit(1);
 
       if (existing) {
-        return existing as ProductRow;
+        return backfillProductImage(tx, existing as ProductRow, input.imageUrl);
       }
 
       try {
@@ -723,6 +723,31 @@ class DrizzleCartwiseDb implements CartwiseDb {
 }
 
 export const cartwiseDb: CartwiseDb = new DrizzleCartwiseDb();
+
+type DbExecutor = typeof drizzleDb | Parameters<Parameters<typeof drizzleDb.transaction>[0]>[0];
+
+/**
+ * A product row created before its chain returned an image keeps imageUrl null
+ * forever because insertProduct returns existing rows untouched. When a later
+ * collection carries an image, fill the gap (never overwrite an existing image).
+ */
+async function backfillProductImage(
+  db: DbExecutor,
+  existing: ProductRow,
+  imageUrl: string | null,
+): Promise<ProductRow> {
+  if (!imageUrl || existing.imageUrl) {
+    return existing;
+  }
+
+  const [updated] = await db
+    .update(products)
+    .set({ imageUrl })
+    .where(and(eq(products.id, existing.id), isNull(products.imageUrl)))
+    .returning();
+
+  return (updated as ProductRow | undefined) ?? existing;
+}
 
 function normalizeIdentity(value: string): string {
   return value.trim().toLowerCase();
