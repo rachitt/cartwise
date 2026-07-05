@@ -33,6 +33,12 @@
           "imageWidth": 76
         }
       ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Allow Cartwise to use your location to find nearby grocery stores."
+        }
+      ],
       "expo-notifications"
     ],
     "experiments": {

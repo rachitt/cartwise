@@ -5,10 +5,13 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 type PreferencesState = {
   zip: string;
   selectedStoreIds: string[];
+  locationConfirmed: boolean;
   hasHydrated: boolean;
   setZip: (zip: string) => void;
+  confirmLocation: (zip: string, selectedStoreIds?: string[]) => void;
   setSelectedStoreIds: (storeIds: string[]) => void;
   resetStores: () => void;
+  resetLocation: () => void;
   setHasHydrated: (hasHydrated: boolean) => void;
 };
 
@@ -17,10 +20,14 @@ export const usePreferencesStore = create<PreferencesState>()(
     (set) => ({
       zip: '',
       selectedStoreIds: [],
+      locationConfirmed: false,
       hasHydrated: false,
-      setZip: (zip) => set({ zip }),
+      setZip: (zip) => set({ zip, selectedStoreIds: [], locationConfirmed: false }),
+      confirmLocation: (zip, selectedStoreIds = []) =>
+        set({ zip, selectedStoreIds, locationConfirmed: true }),
       setSelectedStoreIds: (selectedStoreIds) => set({ selectedStoreIds }),
       resetStores: () => set({ selectedStoreIds: [] }),
+      resetLocation: () => set({ zip: '', selectedStoreIds: [], locationConfirmed: false }),
       setHasHydrated: (hasHydrated) => set({ hasHydrated }),
     }),
     {
@@ -29,6 +36,7 @@ export const usePreferencesStore = create<PreferencesState>()(
       partialize: (state) => ({
         zip: state.zip,
         selectedStoreIds: state.selectedStoreIds,
+        locationConfirmed: state.locationConfirmed,
       }),
       onRehydrateStorage: () => (state) => {
         state?.setHasHydrated(true);
@@ -38,5 +46,7 @@ export const usePreferencesStore = create<PreferencesState>()(
 );
 
 export function useNeedsOnboarding() {
-  return usePreferencesStore((state) => state.zip.length !== 5 || state.selectedStoreIds.length < 2);
+  return usePreferencesStore(
+    (state) => !state.locationConfirmed || !/^\d{5}$/.test(state.zip),
+  );
 }

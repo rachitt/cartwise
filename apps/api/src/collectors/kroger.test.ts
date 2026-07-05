@@ -81,6 +81,7 @@ describe("KrogerCollector", () => {
               latitude: 39.1465,
               longitude: -84.4298,
             },
+            hours: weeklyHours(),
           },
         ],
       }),
@@ -105,6 +106,95 @@ describe("KrogerCollector", () => {
     expect(String(fetchMock.mock.calls[1]?.[0])).toContain(
       "/v1/locations?filter.zipCode.near=45202&filter.limit=10",
     );
+  });
+
+  it("filters internal and non-grocery locations from nearby stores", async () => {
+    const fetchMock = queuedFetch([
+      tokenResponse("token"),
+      jsonResponse({
+        data: [
+          {
+            locationId: "01400513",
+            name: "Kroger - Kroger On the Rhine",
+            phone: "5132635900",
+            address: {
+              addressLine1: "100 E Court St",
+              city: "Cincinnati",
+              state: "OH",
+              zipCode: "45202",
+            },
+            geolocation: {
+              latitude: 39.10682,
+              longitude: -84.51253,
+            },
+            hours: weeklyHours(),
+          },
+          {
+            locationId: "540FC200",
+            name: "Kroger - Spoke Forecast",
+            address: {
+              addressLine1: "1014 Vine St",
+              city: "Cincinnati",
+              state: "OH",
+              zipCode: "45202",
+            },
+            geolocation: {
+              latitude: 39.106758,
+              longitude: -84.513951,
+            },
+            hours: { timezone: "America/New_York" },
+          },
+          {
+            locationId: "01400929-FUEL",
+            name: "Kroger Fuel Center",
+            phone: "5135551212",
+            address: {
+              addressLine1: "1 W Corry St",
+              city: "Cincinnati",
+              state: "OH",
+              zipCode: "45219",
+            },
+            geolocation: {
+              latitude: 39.128667,
+              longitude: -84.509336,
+            },
+            hours: weeklyHours(),
+          },
+          {
+            locationId: "540FC000",
+            name: "Kroger - Zero Warehouse",
+            phone: "9999999999",
+            address: {
+              addressLine1: "1014 Vine St",
+              city: "Cincinnati",
+              state: "OH",
+              zipCode: "45202",
+            },
+            geolocation: {
+              latitude: 39.106758,
+              longitude: -84.513951,
+            },
+            hours: weeklyHours(),
+          },
+        ],
+      }),
+    ]);
+    const collector = new KrogerCollector({
+      clientId: "id",
+      clientSecret: "secret",
+      fetch: fetchMock,
+    });
+
+    await expect(collector.findStores("45202")).resolves.toEqual([
+      {
+        externalLocationId: "01400513",
+        name: "Kroger - Kroger On the Rhine",
+        address: "100 E Court St, Cincinnati, OH, 45202",
+        zip: "45202",
+        lat: 39.10682,
+        lng: -84.51253,
+      },
+    ]);
   });
 
   it("maps product search results including promo, size, image, and missing price", async () => {
@@ -239,4 +329,16 @@ function queuedFetch(responses: Response[]) {
 
     return response;
   });
+}
+
+function weeklyHours() {
+  return {
+    monday: { open: "06:00", close: "22:00", open24: false },
+    tuesday: { open: "06:00", close: "22:00", open24: false },
+    wednesday: { open: "06:00", close: "22:00", open24: false },
+    thursday: { open: "06:00", close: "22:00", open24: false },
+    friday: { open: "06:00", close: "22:00", open24: false },
+    saturday: { open: "06:00", close: "22:00", open24: false },
+    sunday: { open: "06:00", close: "22:00", open24: false },
+  };
 }

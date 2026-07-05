@@ -5,7 +5,7 @@ const chainRows = [
   { slug: "kroger", name: "Kroger" },
   { slug: "target", name: "Target" },
   { slug: "walmart", name: "Walmart" },
-  { slug: "aldi", name: "Aldi" },
+  { slug: "aldi", name: "ALDI" },
 ] as const;
 
 try {

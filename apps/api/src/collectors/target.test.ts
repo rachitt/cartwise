@@ -40,30 +40,21 @@ describe("TargetCollector", () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe("https://www.target.com/");
   });
 
-  it("maps nearby stores", async () => {
+  it("maps nearby stores from preferred stores and public location details", async () => {
     const fetchMock = queuedFetch([
-      jsonResponse({
-        data: {
-          nearby_stores: {
-            stores: [
-              {
-                store_id: "1092",
-                location_name: "Cincinnati Oakley",
-                mailing_address: {
-                  address_line1: "3245 Geier Dr",
-                  city: "Cincinnati",
-                  region: "OH",
-                  postal_code: "45209",
-                },
-                geographic_specifications: {
-                  latitude: 39.1532,
-                  longitude: -84.427,
-                },
-              },
-            ],
-          },
-        },
-      }),
+      jsonResponse(targetPreferredStores(["1092"])),
+      jsonResponse(
+        targetLocation({
+          id: "1092",
+          name: "Cincinnati Oakley",
+          addressLine: "3245 Geier Dr",
+          city: "Cincinnati",
+          region: "OH",
+          zip: "45209",
+          lat: 39.1532,
+          lng: -84.427,
+        }),
+      ),
     ]);
     const collector = new TargetCollector({ apiKey: "test-key", fetch: fetchMock });
 
@@ -78,52 +69,130 @@ describe("TargetCollector", () => {
       },
     ]);
 
-    const url = new URL(String(fetchMock.mock.calls[0]?.[0]));
-    expect(url.pathname).toBe("/redsky_aggregations/v1/web/nearby_stores_v1");
-    expect(url.searchParams.get("key")).toBe("test-key");
-    expect(url.searchParams.get("limit")).toBe("10");
-    expect(url.searchParams.get("within")).toBe("20");
-    expect(url.searchParams.get("place")).toBe("45202");
-    expect(url.searchParams.get("channel")).toBe("WEB");
-    expect(url.searchParams.get("visitor_id")).toMatch(/^[a-f0-9]{32}$/);
+    const preferredStoresUrl = new URL(String(fetchMock.mock.calls[0]?.[0]));
+    expect(preferredStoresUrl.hostname).toBe("api.target.com");
+    expect(preferredStoresUrl.pathname).toBe(
+      "/location_fulfillment_aggregations/v1/preferred_stores",
+    );
+    expect(preferredStoresUrl.searchParams.get("key")).toBe("test-key");
+    expect(preferredStoresUrl.searchParams.get("zipcode")).toBe("45202");
     expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
       Accept: "application/json",
     });
+
+    const locationUrl = new URL(String(fetchMock.mock.calls[1]?.[0]));
+    expect(locationUrl.hostname).toBe("api.target.com");
+    expect(locationUrl.pathname).toBe("/locations/v3/public/1092");
+    expect(locationUrl.searchParams.get("key")).toBe("test-key");
   });
 
-  it("maps product search results including sale, regular, and missing prices", async () => {
+  it("uses capability coordinates when public location coordinates are missing", async () => {
+    const fetchMock = queuedFetch([
+      jsonResponse(targetPreferredStores(["1092"])),
+      jsonResponse(
+        targetLocation({
+          id: "1092",
+          name: "Beechmont Area",
+          addressLine: "8680 Beechmont Ave",
+          city: "Cincinnati",
+          region: "OH",
+          zip: "45255-4710",
+          lat: null,
+          lng: null,
+          capabilities: [
+            { capability_name: "Fresh Grocery", latitude: 39.073405, longitude: -84.313929 },
+          ],
+        }),
+      ),
+    ]);
+    const collector = new TargetCollector({ apiKey: "test-key", fetch: fetchMock });
+
+    await expect(collector.findStores("45202")).resolves.toEqual([
+      {
+        externalLocationId: "1092",
+        name: "Beechmont Area",
+        address: "8680 Beechmont Ave, Cincinnati, OH, 45255-4710",
+        zip: "45255-4710",
+        lat: 39.073405,
+        lng: -84.313929,
+      },
+    ]);
+  });
+
+  it("filters Target locations that do not offer groceries", async () => {
+    const fetchMock = queuedFetch([
+      jsonResponse(targetPreferredStores(["1", "2"])),
+      jsonResponse(
+        targetLocation({
+          id: "1",
+          name: "Fresh Target",
+          addressLine: "1 Main St",
+          city: "Cincinnati",
+          region: "OH",
+          zip: "45202",
+          lat: 39.1,
+          lng: -84.5,
+          capabilities: [{ capability_code: "Fresh Grocery" }],
+        }),
+      ),
+      jsonResponse(
+        targetLocation({
+          id: "2",
+          name: "Optical Only Target",
+          addressLine: "2 Main St",
+          city: "Cincinnati",
+          region: "OH",
+          zip: "45202",
+          lat: 39.2,
+          lng: -84.6,
+          capabilities: [{ capability_name: "Target Optical" }],
+        }),
+      ),
+    ]);
+    const collector = new TargetCollector({ apiKey: "test-key", fetch: fetchMock });
+
+    await expect(collector.findStores("45202")).resolves.toEqual([
+      {
+        externalLocationId: "1",
+        name: "Fresh Target",
+        address: "1 Main St, Cincinnati, OH, 45202",
+        zip: "45202",
+        lat: 39.1,
+        lng: -84.5,
+      },
+    ]);
+  });
+
+  it("maps CDUI product search results including sale, regular, and missing prices", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-04T12:00:00Z"));
     const fetchMock = queuedFetch([
-      jsonResponse({
-        data: {
-          search: {
-            products: [
-              targetProduct({
-                tcin: "12953453",
-                title: "Good &amp; Gather Sparkling Water 12oz",
-                brand: "Good & Gather",
-                imageUrl: "https://target.scene7.com/is/image/Target/GUEST_sale",
-                currentRetail: 2.99,
-                regularRetail: 3.49,
-              }),
-              targetProduct({
-                tcin: "13264003",
-                title: "Market Pantry Bread 20 oz",
-                brand: "Market Pantry",
-                imageUrl: "https://target.scene7.com/is/image/Target/GUEST_regular",
-                currentRetail: 1.99,
-                regularRetail: 1.99,
-              }),
-              targetProduct({
-                tcin: "54561123",
-                title: "Bananas",
-                brand: "Chiquita",
-              }),
-            ],
-          },
-        },
-      }),
+      jsonResponse(targetLocation({ id: "1092" })),
+      jsonResponse(
+        targetCduiResponse([
+          targetProduct({
+            tcin: "12953453",
+            title: "Good &amp; Gather Sparkling Water 12oz",
+            brand: "Good & Gather",
+            imageUrl: "https://target.scene7.com/is/image/Target/GUEST_sale",
+            currentRetail: 2.99,
+            regularRetail: 3.49,
+          }),
+          targetProduct({
+            tcin: "13264003",
+            title: "Market Pantry Bread 20 oz",
+            brand: "Market Pantry",
+            imageUrl: "https://target.scene7.com/is/image/Target/GUEST_regular",
+            currentRetail: 1.99,
+            regularRetail: 1.99,
+          }),
+          targetProduct({
+            tcin: "54561123",
+            title: "Bananas",
+            brand: "Chiquita",
+          }),
+        ]),
+      ),
     ]);
     const collector = new TargetCollector({ apiKey: "test-key", fetch: fetchMock });
 
@@ -166,42 +235,50 @@ describe("TargetCollector", () => {
       },
     ]);
 
-    const url = new URL(String(fetchMock.mock.calls[0]?.[0]));
-    expect(url.pathname).toBe("/redsky_aggregations/v1/web/plp_search_v2");
+    const url = new URL(String(fetchMock.mock.calls[1]?.[0]));
+    expect(url.hostname).toBe("cdui-orchestrations.target.com");
+    expect(url.pathname).toBe("/cdui_orchestrations/v1/pages/slp");
     expect(url.searchParams.get("keyword")).toBe("water");
-    expect(url.searchParams.get("count")).toBe("20");
+    expect(url.searchParams.get("count")).toBe("24");
     expect(url.searchParams.get("offset")).toBe("0");
-    expect(url.searchParams.get("pricing_store_id")).toBe("1092");
+    expect(url.searchParams.get("page")).toBe("/s/water");
+    expect(url.searchParams.get("store_id")).toBe("1092");
+    expect(url.searchParams.get("scheduled_delivery_zip_code")).toBe("45209");
     expect(url.searchParams.get("channel")).toBe("WEB");
-    expect(url.searchParams.get("visitor_id")).toMatch(/^[a-f0-9]{32}$/);
+    expect(url.searchParams.get("visitor_id")).toMatch(/^[A-F0-9]{32}$/);
   });
 
-  it("maps PDP price lookups and skips 404 products", async () => {
+  it("maps exact TCIN price lookups and skips missing products", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-04T12:00:00Z"));
     const fetchMock = queuedFetch([
-      jsonResponse({
-        data: {
-          product: targetProduct({
+      jsonResponse(targetLocation({ id: "1092" })),
+      jsonResponse(
+        targetCduiResponse([
+          targetProduct({
             tcin: "12953453",
             title: "Good & Gather Sparkling Water 12oz",
             brand: "Good & Gather",
             currentRetail: 2.99,
             regularRetail: 3.49,
           }),
-        },
-      }),
-      new Response(null, { status: 404 }),
-      jsonResponse({
-        data: {
-          product: targetProduct({
+        ]),
+      ),
+      jsonResponse(targetCduiResponse([])),
+      jsonResponse(
+        targetCduiResponse([
+          targetProduct({
+            tcin: "parent",
+            title: "Market Pantry Bread",
+          }),
+          targetProduct({
             tcin: "13264003",
             title: "Market Pantry Bread 20 oz",
             currentRetail: 1.99,
             regularRetail: 1.99,
           }),
-        },
-      }),
+        ]),
+      ),
     ]);
     const collector = new TargetCollector({ apiKey: "test-key", fetch: fetchMock });
 
@@ -233,57 +310,64 @@ describe("TargetCollector", () => {
     ]);
 
     const urls = fetchMock.mock.calls.map(([url]) => new URL(String(url)));
-    expect(urls.map((url) => url.searchParams.get("tcin"))).toEqual([
+    expect(urls.slice(1).map((url) => url.searchParams.get("keyword"))).toEqual([
       "12953453",
       "missing",
       "13264003",
     ]);
-    expect(urls.every((url) => url.pathname === "/redsky_aggregations/v1/web/pdp_client_v1")).toBe(
-      true,
-    );
-    expect(new Set(urls.map((url) => url.searchParams.get("visitor_id"))).size).toBe(1);
+    expect(
+      urls.slice(1).every((url) => url.pathname === "/cdui_orchestrations/v1/pages/slp"),
+    ).toBe(true);
+    expect(urls.slice(1).map((url) => url.searchParams.get("page"))).toEqual([
+      "/s/12953453",
+      "/s/missing",
+      "/s/13264003",
+    ]);
+    expect(new Set(urls.slice(1).map((url) => url.searchParams.get("visitor_id"))).size).toBe(1);
   });
 
   it("retries one 429 response using Retry-After", async () => {
     const fetchMock = queuedFetch([
+      jsonResponse(targetLocation({ id: "1092" })),
       new Response(null, { status: 429, headers: { "Retry-After": "0" } }),
-      jsonResponse({ data: { search: { products: [] } } }),
+      jsonResponse(targetCduiResponse([])),
     ]);
     const collector = new TargetCollector({ apiKey: "test-key", fetch: fetchMock });
 
     await expect(collector.searchProducts("milk", "1092")).resolves.toEqual([]);
 
-    expect(fetchMock.mock.calls).toHaveLength(2);
-    expect(fetchMock.mock.calls.every(([url]) => String(url).includes("/plp_search_v2"))).toBe(true);
+    expect(fetchMock.mock.calls).toHaveLength(3);
+    expect(String(fetchMock.mock.calls[1]?.[0])).toContain("/cdui_orchestrations/v1/pages/slp");
+    expect(String(fetchMock.mock.calls[2]?.[0])).toContain("/cdui_orchestrations/v1/pages/slp");
   });
 
-  it("re-scrapes the web key and retries once after a RedSky 403", async () => {
+  it("re-scrapes the web key and retries once after a Target API 403", async () => {
     const firstKey = "a".repeat(40);
     const refreshedKey = "b".repeat(40);
     const fetchMock = queuedFetch([
       htmlResponse(`"apiKey":"${firstKey}"`),
       new Response(null, { status: 403 }),
       htmlResponse(`"apiKey":"${refreshedKey}"`),
-      jsonResponse({ data: { search: { products: [] } } }),
+      jsonResponse(targetLocation({ id: "1092" })),
+      jsonResponse(targetCduiResponse([])),
     ]);
     const collector = new TargetCollector({ fetch: fetchMock });
 
     await expect(collector.searchProducts("milk", "1092")).resolves.toEqual([]);
 
-    expect(fetchMock.mock.calls).toHaveLength(4);
+    expect(fetchMock.mock.calls).toHaveLength(5);
     expect(fetchMock.mock.calls[0]?.[0]).toBe("https://www.target.com/");
     expect(fetchMock.mock.calls[2]?.[0]).toBe("https://www.target.com/");
 
-    const firstRedSkyUrl = new URL(String(fetchMock.mock.calls[1]?.[0]));
-    const retriedRedSkyUrl = new URL(String(fetchMock.mock.calls[3]?.[0]));
-    expect(firstRedSkyUrl.searchParams.get("key")).toBe(firstKey);
-    expect(retriedRedSkyUrl.searchParams.get("key")).toBe(refreshedKey);
-    expect(retriedRedSkyUrl.searchParams.get("visitor_id")).toBe(
-      firstRedSkyUrl.searchParams.get("visitor_id"),
-    );
+    const firstLocationUrl = new URL(String(fetchMock.mock.calls[1]?.[0]));
+    const retriedLocationUrl = new URL(String(fetchMock.mock.calls[3]?.[0]));
+    const cduiUrl = new URL(String(fetchMock.mock.calls[4]?.[0]));
+    expect(firstLocationUrl.searchParams.get("key")).toBe(firstKey);
+    expect(retriedLocationUrl.searchParams.get("key")).toBe(refreshedKey);
+    expect(cduiUrl.searchParams.get("key")).toBe(refreshedKey);
   });
 
-  it("maps a second RedSky 403 to an auth error", async () => {
+  it("maps a second Target API 403 to an auth error", async () => {
     const fetchMock = queuedFetch([
       htmlResponse(`"apiKey":"${"a".repeat(40)}"`),
       new Response(null, { status: 403 }),
@@ -301,15 +385,21 @@ describe("TargetCollector", () => {
 
   it("uses TARGET_API_KEY without scraping", async () => {
     process.env.TARGET_API_KEY = "env-key";
-    const fetchMock = queuedFetch([jsonResponse({ data: { search: { products: [] } } })]);
+    const fetchMock = queuedFetch([
+      jsonResponse(targetLocation({ id: "1092" })),
+      jsonResponse(targetCduiResponse([])),
+    ]);
     const collector = new TargetCollector({ fetch: fetchMock });
 
     await expect(collector.searchProducts("milk", "1092")).resolves.toEqual([]);
 
-    expect(fetchMock.mock.calls).toHaveLength(1);
-    const url = new URL(String(fetchMock.mock.calls[0]?.[0]));
-    expect(url.hostname).toBe("redsky.target.com");
-    expect(url.searchParams.get("key")).toBe("env-key");
+    expect(fetchMock.mock.calls).toHaveLength(2);
+    const locationUrl = new URL(String(fetchMock.mock.calls[0]?.[0]));
+    const cduiUrl = new URL(String(fetchMock.mock.calls[1]?.[0]));
+    expect(locationUrl.hostname).toBe("api.target.com");
+    expect(locationUrl.searchParams.get("key")).toBe("env-key");
+    expect(cduiUrl.hostname).toBe("cdui-orchestrations.target.com");
+    expect(cduiUrl.searchParams.get("key")).toBe("env-key");
   });
 
   it("maps web key scrape failure without fallback to an auth error", async () => {
@@ -344,6 +434,76 @@ describe("TargetCollector", () => {
   });
 });
 
+function targetPreferredStores(ids: string[]) {
+  return {
+    preferred_stores: ids.map((id) => ({
+      location_id: id,
+      location_names: [{ name_type: "Proj Name", name: `Target ${id}` }],
+    })),
+  };
+}
+
+function targetLocation({
+  id,
+  name = "Cincinnati Oakley",
+  addressLine = "3245 Geier Dr",
+  city = "Cincinnati",
+  region = "OH",
+  zip = "45209-1234",
+  lat = 39.1532,
+  lng = -84.427,
+  capabilities = [{ capability_name: "Fresh Grocery" }],
+}: {
+  id: string;
+  name?: string;
+  addressLine?: string;
+  city?: string;
+  region?: string;
+  zip?: string;
+  lat?: number | null;
+  lng?: number | null;
+  capabilities?: Array<Record<string, unknown>>;
+}) {
+  return {
+    location_id: id,
+    location_names: [{ name_type: "Proj Name", name }],
+    address: [
+      {
+        address_context_code: "M",
+        address_line1: addressLine,
+        city,
+        region,
+        postal_code: zip,
+      },
+    ],
+    geographic_specifications:
+      lat === null || lng === null
+        ? { time_zone_code: "EST", iso_time_zone_code: "America/New_York" }
+        : {
+            latitude: lat,
+            longitude: lng,
+            time_zone_code: "EST",
+            iso_time_zone_code: "America/New_York",
+          },
+    capabilities,
+  };
+}
+
+function targetCduiResponse(products: ReturnType<typeof targetProduct>[]) {
+  return {
+    data_source_modules: [
+      {
+        module_type: "SearchWebDataSource",
+        module_data: {
+          search_response: {
+            products,
+          },
+        },
+      },
+    ],
+  };
+}
+
 function targetProduct({
   tcin,
   title,
@@ -368,8 +528,10 @@ function targetProduct({
       primary_brand: brand ? { name: brand } : undefined,
       enrichment: imageUrl
         ? {
-            images: {
-              primary_image_url: imageUrl,
+            image_info: {
+              primary_image: {
+                url: imageUrl,
+              },
             },
           }
         : undefined,

@@ -8,6 +8,7 @@ import type { CollectedProduct, Collector } from "../collectors/types.js";
 import type { CartwiseDb, ProductRow } from "../db/repository.js";
 
 const CHAINS: ChainSlug[] = ["kroger", "target", "walmart", "aldi"];
+const MAX_STORE_IDS = 40;
 const STORES_TTL_SECONDS = 24 * 60 * 60;
 const PRODUCTS_TTL_SECONDS = 6 * 60 * 60;
 
@@ -21,10 +22,10 @@ const storeIdsSchema = z.string().transform((value, context) => {
     .map((storeId) => storeId.trim())
     .filter(Boolean);
 
-  if (storeIds.length === 0 || storeIds.length > 8) {
+  if (storeIds.length === 0 || storeIds.length > MAX_STORE_IDS) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
-      message: "storeIds must include 1-8 UUIDs",
+      message: `storeIds must include 1-${MAX_STORE_IDS} UUIDs`,
     });
     return z.NEVER;
   }

@@ -4,6 +4,21 @@ import { CollectorError } from "./types.js";
 const KROGER_BASE_URL = "https://api.kroger.com";
 const TOKEN_REFRESH_SKEW_MS = 60_000;
 const DEFAULT_RATE_LIMIT_BACKOFF_MS = 250;
+const NON_GROCERY_LOCATION_NAME_PATTERNS = [
+  /\bfuel\b/i,
+  /\bfuel center\b/i,
+  /\bpharmacy\b/i,
+  /\blittle clinic\b/i,
+  /\bjewelers?\b/i,
+  /\bspoke\b/i,
+  /\bforecast\b/i,
+  /\bshed\b/i,
+  /\bwarehouse\b/i,
+  /\bunused\b/i,
+  /\btrans\b/i,
+  /\bfulfillment\b/i,
+  /\bdistribution\b/i,
+];
 
 interface KrogerCollectorOptions {
   clientId?: string;
@@ -18,6 +33,7 @@ interface KrogerLocationResponse {
 interface KrogerLocation {
   locationId?: unknown;
   name?: unknown;
+  phone?: unknown;
   address?: {
     addressLine1?: unknown;
     city?: unknown;
@@ -28,6 +44,7 @@ interface KrogerLocation {
     latitude?: unknown;
     longitude?: unknown;
   };
+  hours?: Record<string, unknown>;
 }
 
 interface KrogerProductResponse {
@@ -84,7 +101,9 @@ export class KrogerCollector implements Collector {
       throw new CollectorError(this.chain, "parse", "Kroger locations response missing data array");
     }
 
-    return payload.data.map((location) => this.mapLocation(location));
+    return payload.data
+      .filter(isCustomerFacingGroceryLocation)
+      .map((location) => this.mapLocation(location));
   }
 
   async searchProducts(term: string, externalLocationId: string): Promise<CollectedProduct[]> {
@@ -273,6 +292,42 @@ function requiredString(value: unknown, field: string): string {
   }
 
   return value;
+}
+
+function isCustomerFacingGroceryLocation(location: KrogerLocation): boolean {
+  const name = optionalString(location.name);
+
+  if (!name) {
+    return false;
+  }
+
+  if (NON_GROCERY_LOCATION_NAME_PATTERNS.some((pattern) => pattern.test(name))) {
+    return false;
+  }
+
+  const phone = optionalString(location.phone);
+  if (phone === "9999999999") {
+    return false;
+  }
+
+  return hasCustomerHours(location.hours);
+}
+
+function hasCustomerHours(hours: KrogerLocation["hours"]): boolean {
+  if (!hours || typeof hours !== "object") {
+    return false;
+  }
+
+  return ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"].some(
+    (day) => {
+      const dayHours = hours[day];
+      return (
+        dayHours !== null &&
+        typeof dayHours === "object" &&
+        ("open" in dayHours || "close" in dayHours || "open24" in dayHours)
+      );
+    },
+  );
 }
 
 function requiredNumber(value: unknown, field: string): number {

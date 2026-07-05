@@ -12,15 +12,11 @@ import { useTheme } from '@/hooks/use-theme';
 
 export default function SettingsScreen() {
   const zip = usePreferencesStore((state) => state.zip);
-  const selectedStoreIds = usePreferencesStore((state) => state.selectedStoreIds);
-  const resetStores = usePreferencesStore((state) => state.resetStores);
+  const resetLocation = usePreferencesStore((state) => state.resetLocation);
   const storesQuery = useStores(zip);
   const theme = useTheme();
 
-  const selectedStores = useMemo(() => {
-    const selected = new Set(selectedStoreIds);
-    return (storesQuery.data?.stores ?? []).filter((store) => selected.has(store.id));
-  }, [selectedStoreIds, storesQuery.data?.stores]);
+  const activeStores = useMemo(() => storesQuery.data?.stores ?? [], [storesQuery.data?.stores]);
 
   return (
     <ThemedView style={styles.screen}>
@@ -28,40 +24,50 @@ export default function SettingsScreen() {
         <ScrollView contentContainerStyle={styles.content} style={styles.scrollView}>
           <View style={styles.header}>
             <ThemedText type="subtitle">Settings</ThemedText>
-            <ThemedText themeColor="textSecondary">Manage the stores used for comparisons.</ThemedText>
+            <ThemedText themeColor="textSecondary">
+              Cartwise compares nearby grocery stores automatically.
+            </ThemedText>
           </View>
 
           <ThemedView type="backgroundElement" style={styles.panel}>
             <ThemedText type="small" themeColor="textSecondary">
-              ZIP
+              Location ZIP
             </ThemedText>
-            <ThemedText type="smallBold">{zip}</ThemedText>
+            <ThemedText type="smallBold">{zip || 'Not set'}</ThemedText>
           </ThemedView>
 
           <View style={styles.section}>
-            <ThemedText type="smallBold">Selected stores</ThemedText>
-            {selectedStores.map((store) => (
-              <ThemedView key={store.id} type="backgroundElement" style={styles.storeRow}>
-                <View style={styles.storeCopy}>
-                  <ThemedText type="smallBold">{store.name}</ThemedText>
-                  <ThemedText type="small" themeColor="textSecondary">
-                    {chainLabel(store.chain)} · {store.distanceMiles?.toFixed(1) ?? '--'} mi
-                  </ThemedText>
-                </View>
+            <ThemedText type="smallBold">Nearby stores</ThemedText>
+            {activeStores.length > 0 ? (
+              activeStores.map((store) => (
+                <ThemedView key={store.id} type="backgroundElement" style={styles.storeRow}>
+                  <View style={styles.storeCopy}>
+                    <ThemedText type="smallBold">{store.name}</ThemedText>
+                    <ThemedText type="small" themeColor="textSecondary">
+                      {chainLabel(store.chain)} · {store.distanceMiles?.toFixed(1) ?? '--'} mi
+                    </ThemedText>
+                  </View>
+                </ThemedView>
+              ))
+            ) : (
+              <ThemedView type="backgroundElement" style={styles.storeRow}>
+                <ThemedText type="small" themeColor="textSecondary">
+                  Cartwise is comparing all nearby stores for this location.
+                </ThemedText>
               </ThemedView>
-            ))}
+            )}
           </View>
 
           <Pressable
             accessibilityRole="button"
-            onPress={resetStores}
+            onPress={resetLocation}
             style={({ pressed }) => [
-              styles.button,
-              { backgroundColor: theme.accent },
+              styles.secondaryButton,
+              { borderColor: theme.border },
               pressed && styles.pressed,
             ]}>
-            <ThemedText type="smallBold" style={styles.buttonText}>
-              Change stores
+            <ThemedText type="smallBold">
+              Change location
             </ThemedText>
           </Pressable>
         </ScrollView>
@@ -117,6 +123,14 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     color: '#ffffff',
+  },
+  secondaryButton: {
+    minHeight: 52,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.three,
   },
   pressed: {
     opacity: 0.72,

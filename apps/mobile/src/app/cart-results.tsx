@@ -41,7 +41,7 @@ export default function CartResultsScreen() {
       <ScreenShell>
         <MessageState
           title="No cart results yet"
-          message="Finalize your cart to compare totals across selected stores."
+          message="Finalize your cart to compare totals across nearby stores."
         />
         <BackButton label="Back to cart" />
       </ScreenShell>

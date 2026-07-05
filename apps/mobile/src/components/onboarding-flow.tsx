@@ -1,66 +1,75 @@
-import type { Store } from '@cartwise/shared';
-import { useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  TextInput,
-  View,
-} from 'react-native';
+import * as Location from 'expo-location';
+import { useState } from 'react';
+import { Keyboard, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { useStores } from '@/api/queries';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
-import { chainLabel } from '@/lib/price';
-import { usePreferencesStore } from '@/state/preferences';
 import { useTheme } from '@/hooks/use-theme';
-
-type Step = 'zip' | 'stores';
+import { usePreferencesStore } from '@/state/preferences';
 
 export function OnboardingFlow() {
   const persistedZip = usePreferencesStore((state) => state.zip);
-  const selectedStoreIds = usePreferencesStore((state) => state.selectedStoreIds);
-  const setZip = usePreferencesStore((state) => state.setZip);
-  const setSelectedStoreIds = usePreferencesStore((state) => state.setSelectedStoreIds);
-  const [step, setStep] = useState<Step>(persistedZip.length === 5 ? 'stores' : 'zip');
+  const confirmLocation = usePreferencesStore((state) => state.confirmLocation);
   const [zipInput, setZipInput] = useState(persistedZip);
-  const [draftStoreIds, setDraftStoreIds] = useState<string[]>(selectedStoreIds);
+  const [locationError, setLocationError] = useState<string | null>(null);
+  const [resolvingLocation, setResolvingLocation] = useState(false);
   const theme = useTheme();
   const zipIsValid = /^\d{5}$/.test(zipInput);
-  const storesQuery = useStores(persistedZip);
 
-  const sortedStores = useMemo(
-    () =>
-      [...(storesQuery.data?.stores ?? [])].sort(
-        (first, second) => (first.distanceMiles ?? 0) - (second.distanceMiles ?? 0),
-      ),
-    [storesQuery.data?.stores],
-  );
+  async function useCurrentLocation() {
+    setLocationError(null);
+    setResolvingLocation(true);
+
+    try {
+      const servicesEnabled = await Location.hasServicesEnabledAsync();
+      if (!servicesEnabled) {
+        throw new Error('Turn on location services, then try again.');
+      }
+
+      const permission = await Location.requestForegroundPermissionsAsync();
+      if (permission.status !== 'granted') {
+        throw new Error('Location permission is needed to find nearby grocery stores.');
+      }
+
+      const lastKnown = await Location.getLastKnownPositionAsync({
+        maxAge: 5 * 60 * 1000,
+        requiredAccuracy: 5000,
+      });
+      const position =
+        lastKnown ??
+        (await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        }));
+      const addresses = await Location.reverseGeocodeAsync({
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+      });
+      const postalCode = getPostalCode(addresses);
+
+      if (!postalCode) {
+        throw new Error('Could not resolve your ZIP code from this location.');
+      }
+
+      setZipInput(postalCode);
+      confirmLocation(postalCode);
+      Keyboard.dismiss();
+    } catch (error) {
+      setLocationError(getErrorMessage(error));
+    } finally {
+      setResolvingLocation(false);
+    }
+  }
 
   function submitZip() {
     if (!zipIsValid) {
       return;
     }
 
-    setZip(zipInput);
-    setSelectedStoreIds([]);
-    setDraftStoreIds([]);
-    setStep('stores');
-  }
-
-  function toggleStore(storeId: string) {
-    setDraftStoreIds((current) =>
-      current.includes(storeId) ? current.filter((id) => id !== storeId) : [...current, storeId],
-    );
-  }
-
-  function finishOnboarding() {
-    if (draftStoreIds.length >= 2) {
-      setSelectedStoreIds(draftStoreIds);
-    }
+    setLocationError(null);
+    confirmLocation(zipInput);
+    Keyboard.dismiss();
   }
 
   return (
@@ -71,82 +80,59 @@ export function OnboardingFlow() {
             <ThemedText type="smallBold" themeColor="accent">
               Cartwise
             </ThemedText>
-            <ThemedText type="subtitle">
-              {step === 'zip' ? 'Compare grocery prices nearby' : 'Choose nearby stores'}
-            </ThemedText>
+            <ThemedText type="subtitle">Find nearby groceries</ThemedText>
             <ThemedText themeColor="textSecondary">
-              {step === 'zip'
-                ? 'Enter a ZIP code to find stores before comparing one item at a time.'
-                : 'Pick at least two stores so Cartwise can rank prices for each item.'}
+              Set your location first. Cartwise will automatically search all nearby grocery stores
+              for every item.
             </ThemedText>
           </View>
 
-          {step === 'zip' ? (
-            <View style={styles.panel}>
-              <TextInput
-                accessibilityLabel="ZIP code"
-                inputMode="numeric"
-                maxLength={5}
-                placeholder="45202"
-                placeholderTextColor={theme.textSecondary}
-                value={zipInput}
-                onChangeText={(value) => setZipInput(value.replace(/\D/g, '').slice(0, 5))}
-                style={[
-                  styles.input,
-                  {
-                    color: theme.text,
-                    borderColor: zipIsValid || zipInput.length === 0 ? theme.border : theme.danger,
-                    backgroundColor: theme.backgroundElement,
-                  },
-                ]}
-              />
-              {zipInput.length > 0 && !zipIsValid ? (
-                <ThemedText type="small" themeColor="danger">
-                  Enter a 5-digit ZIP code.
-                </ThemedText>
-              ) : null}
-              <PrimaryButton label="Find stores" disabled={!zipIsValid} onPress={submitZip} />
-            </View>
-          ) : (
-            <View style={styles.storeStep}>
-              <View style={styles.stepBar}>
-                <ThemedText type="small" themeColor="textSecondary">
-                  ZIP {persistedZip}
-                </ThemedText>
-                <Pressable onPress={() => setStep('zip')} hitSlop={12}>
-                  <ThemedText type="linkPrimary">Change ZIP</ThemedText>
-                </Pressable>
-              </View>
+          <View style={styles.panel}>
+            <PrimaryButton
+              label={resolvingLocation ? 'Finding location...' : 'Use current location'}
+              disabled={resolvingLocation}
+              onPress={useCurrentLocation}
+            />
 
-              <ScrollView contentContainerStyle={styles.storeList}>
-                {storesQuery.isLoading ? (
-                  <StoreSkeleton />
-                ) : sortedStores.length === 0 ? (
-                  <EmptyPanel message="No stores found nearby." />
-                ) : (
-                  sortedStores.map((store) => (
-                    <StoreOption
-                      key={store.id}
-                      store={store}
-                      selected={draftStoreIds.includes(store.id)}
-                      onPress={() => toggleStore(store.id)}
-                    />
-                  ))
-                )}
-              </ScrollView>
-
-              <PrimaryButton
-                label="Continue"
-                disabled={draftStoreIds.length < 2}
-                onPress={finishOnboarding}
-              />
-              <ThemedText type="small" themeColor="textSecondary" style={styles.centered}>
-                {draftStoreIds.length < 2
-                  ? 'Select at least two stores to continue.'
-                  : `${draftStoreIds.length} stores selected`}
+            <View style={styles.dividerRow}>
+              <View style={[styles.divider, { backgroundColor: theme.border }]} />
+              <ThemedText type="small" themeColor="textSecondary">
+                or enter ZIP
               </ThemedText>
+              <View style={[styles.divider, { backgroundColor: theme.border }]} />
             </View>
-          )}
+
+            <TextInput
+              accessibilityLabel="ZIP code"
+              inputMode="numeric"
+              maxLength={5}
+              onSubmitEditing={submitZip}
+              placeholder="45202"
+              placeholderTextColor={theme.textSecondary}
+              returnKeyType="done"
+              value={zipInput}
+              onChangeText={(value) => setZipInput(value.replace(/\D/g, '').slice(0, 5))}
+              style={[
+                styles.input,
+                {
+                  color: theme.text,
+                  borderColor: zipIsValid || zipInput.length === 0 ? theme.border : theme.danger,
+                  backgroundColor: theme.backgroundElement,
+                },
+              ]}
+            />
+            {zipInput.length > 0 && !zipIsValid ? (
+              <ThemedText type="small" themeColor="danger">
+                Enter a 5-digit ZIP code.
+              </ThemedText>
+            ) : null}
+            {locationError ? (
+              <ThemedText type="small" themeColor="danger">
+                {locationError}
+              </ThemedText>
+            ) : null}
+            <SecondaryButton label="Continue to search" disabled={!zipIsValid} onPress={submitZip} />
+          </View>
         </View>
       </SafeAreaView>
     </ThemedView>
@@ -181,55 +167,52 @@ function PrimaryButton({
   );
 }
 
-function StoreOption({
-  store,
-  selected,
+function SecondaryButton({
+  label,
+  disabled,
   onPress,
 }: {
-  store: Store;
-  selected: boolean;
+  label: string;
+  disabled?: boolean;
   onPress: () => void;
 }) {
   const theme = useTheme();
 
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => pressed && styles.pressed}>
-      <ThemedView
-        type={selected ? 'accentMuted' : 'backgroundElement'}
-        style={[styles.storeOption, { borderColor: selected ? theme.accent : theme.border }]}>
-        <View style={styles.storeCopy}>
-          <ThemedText type="smallBold">{store.name}</ThemedText>
-          <ThemedText type="small" themeColor="textSecondary">
-            {chainLabel(store.chain)} · {store.address}
-          </ThemedText>
-        </View>
-        <View style={styles.distancePill}>
-          <ThemedText type="smallBold" themeColor={selected ? 'accent' : 'textSecondary'}>
-            {store.distanceMiles?.toFixed(1) ?? '--'} mi
-          </ThemedText>
-        </View>
-      </ThemedView>
+    <Pressable
+      accessibilityRole="button"
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.secondaryButton,
+        { borderColor: theme.border, backgroundColor: theme.backgroundElement },
+        pressed && !disabled && styles.pressed,
+        disabled && styles.disabled,
+      ]}>
+      <ThemedText type="smallBold" themeColor={disabled ? 'textSecondary' : 'text'}>
+        {label}
+      </ThemedText>
     </Pressable>
   );
 }
 
-function StoreSkeleton() {
-  return (
-    <View style={styles.skeletonStack}>
-      <ActivityIndicator color="#16a34a" />
-      {[0, 1, 2].map((item) => (
-        <ThemedView key={item} type="backgroundElement" style={styles.skeletonRow} />
-      ))}
-    </View>
-  );
+function getPostalCode(addresses: Location.LocationGeocodedAddress[]) {
+  for (const address of addresses) {
+    const match = address.postalCode?.match(/\d{5}/);
+    if (match) {
+      return match[0];
+    }
+  }
+
+  return null;
 }
 
-function EmptyPanel({ message }: { message: string }) {
-  return (
-    <ThemedView type="backgroundElement" style={styles.emptyPanel}>
-      <ThemedText themeColor="textSecondary">{message}</ThemedText>
-    </ThemedView>
-  );
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message.length > 0) {
+    return error.message;
+  }
+
+  return 'Cartwise could not resolve your location.';
 }
 
 const styles = StyleSheet.create({
@@ -262,34 +245,15 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '700',
   },
-  storeStep: {
-    flex: 1,
-    gap: Spacing.three,
-  },
-  stepBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  storeList: {
-    gap: Spacing.three,
-    paddingBottom: Spacing.two,
-  },
-  storeOption: {
-    borderWidth: 1,
-    borderRadius: 8,
-    padding: Spacing.three,
+  dividerRow: {
+    minHeight: 24,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.three,
+    gap: Spacing.two,
   },
-  storeCopy: {
+  divider: {
     flex: 1,
-    gap: Spacing.one,
-  },
-  distancePill: {
-    minWidth: 58,
-    alignItems: 'flex-end',
+    height: 1,
   },
   primaryButton: {
     minHeight: 52,
@@ -301,24 +265,18 @@ const styles = StyleSheet.create({
   primaryButtonText: {
     color: '#ffffff',
   },
-  pressed: {
-    opacity: 0.72,
-  },
-  centered: {
-    textAlign: 'center',
-  },
-  skeletonStack: {
-    gap: Spacing.three,
-  },
-  skeletonRow: {
-    height: 82,
-    borderRadius: 8,
-  },
-  emptyPanel: {
-    minHeight: 96,
+  secondaryButton: {
+    minHeight: 52,
+    borderWidth: 1,
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: Spacing.three,
+    paddingHorizontal: Spacing.three,
+  },
+  pressed: {
+    opacity: 0.72,
+  },
+  disabled: {
+    opacity: 0.55,
   },
 });

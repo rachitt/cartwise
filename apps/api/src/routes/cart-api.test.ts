@@ -164,6 +164,26 @@ describe("cartApiPlugin", () => {
     expect(response.statusCode).toBe(400);
   });
 
+  it("returns 400 when finalizing with more than forty stores", async () => {
+    const db = new FakeCartDb();
+    const cart = await db.getOrCreateActiveCart(deviceId);
+    await db.upsertCartItem(cart.id, milkId, 1);
+    app = await buildTestApp(db);
+    const storeIds = Array.from(
+      { length: 41 },
+      (_, index) => `10000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/carts/current/finalize",
+      headers: { "x-device-id": deviceId },
+      payload: { storeIds },
+    });
+
+    expect(response.statusCode).toBe(400);
+  });
+
   it("returns 400 when x-device-id is missing", async () => {
     app = await buildTestApp(new FakeCartDb());
 

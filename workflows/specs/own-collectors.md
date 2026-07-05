@@ -1,6 +1,11 @@
 # Own Collectors — Spec (P4)
 
-Goal: store, product, and price retrieval for a ZIP code **without official API credentials**, by building collectors against the retailers' own public web endpoints (the same backends their websites call). The Target RedSky collector already proves the pattern; this generalizes it and makes the read path degrade gracefully.
+Status: superseded for broad product strategy by `workflows/specs/price-data-acquisition.md`.
+Keep this file only as historical context for direct retailer collector slices. Its ALDI and
+Walmart assumptions did not survive live verification on 2026-07-04; do not use this as the
+primary plan for "all kinds of stores."
+
+Goal: store, product, and price retrieval for a ZIP code **without official API credentials**, by building collectors against the retailers' own public web endpoints (the same backends their websites call). The newer Target collector proves the narrower pattern through preferred-store, public-location, and CDUI product-grid endpoints; direct RedSky should be treated as historical context, not the primary Target path.
 
 Non-goals: bulk crawling (forbidden by CLAUDE.md), price history backfill, new mobile UI.
 

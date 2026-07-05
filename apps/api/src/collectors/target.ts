@@ -3,14 +3,15 @@ import { randomBytes } from "node:crypto";
 import type { CollectedProduct, CollectedStore, Collector } from "./types.js";
 import { CollectorError } from "./types.js";
 
-const TARGET_BASE_URL = "https://redsky.target.com/redsky_aggregations/v1/web";
 const TARGET_HOME_URL = "https://www.target.com/";
+const TARGET_API_PLATFORM_BASE_URL = "https://api.target.com";
+const TARGET_CDUI_BASE_URL = "https://cdui-orchestrations.target.com";
 const DEFAULT_TARGET_API_KEY = "9f36aeafbe60771e321a7cc95a78140772ab3e96";
 const DEFAULT_RATE_LIMIT_BACKOFF_MS = 250;
 const WEB_KEY_CACHE_TTL_MS = 24 * 60 * 60 * 1_000;
-const TARGET_VISITOR_ID = randomBytes(16).toString("hex");
-const TARGET_USER_AGENT =
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+const TARGET_VISITOR_ID = randomBytes(16).toString("hex").toUpperCase();
+const TARGET_USER_AGENT = "Mozilla/5.0";
+const TARGET_SEARCH_COUNT = 24;
 const WEB_KEY_REGEXES = [
   /"apiKey":"([a-f0-9]{40})"/,
   /key=([a-f0-9]{40})/,
@@ -25,38 +26,35 @@ interface TargetCollectorOptions {
   fetch?: typeof fetch;
 }
 
-interface TargetNearbyStoresResponse {
-  data?: {
-    nearby_stores?: {
-      stores?: TargetStore[];
-    };
-  };
+interface TargetPreferredStoresResponse {
+  preferred_stores?: TargetPreferredStore[];
 }
 
-interface TargetStore {
-  store_id?: unknown;
+interface TargetPreferredStore {
   location_id?: unknown;
+  location_names?: TargetLocationName[];
+}
+
+interface TargetLocationName {
+  name_type?: unknown;
+  name?: unknown;
+}
+
+interface TargetPublicLocation {
+  location_id?: unknown;
+  store_id?: unknown;
   location_name?: unknown;
   name?: unknown;
-  mailing_address?: {
-    address_line1?: unknown;
-    address_line_1?: unknown;
-    city?: unknown;
-    region?: unknown;
-    state?: unknown;
-    postal_code?: unknown;
-    zip_code?: unknown;
-  };
-  address?: {
-    address_line1?: unknown;
-    address_line_1?: unknown;
-    city?: unknown;
-    region?: unknown;
-    state?: unknown;
-    postal_code?: unknown;
-    zip_code?: unknown;
-  };
+  location_names?: TargetLocationName[];
+  mailing_address?: TargetAddress;
+  address?: TargetAddress | TargetAddress[];
   geographic_specifications?: {
+    latitude?: unknown;
+    longitude?: unknown;
+    iso_time_zone_code?: unknown;
+    time_zone_code?: unknown;
+  };
+  geofence?: {
     latitude?: unknown;
     longitude?: unknown;
   };
@@ -64,20 +62,35 @@ interface TargetStore {
     latitude?: unknown;
     longitude?: unknown;
   };
+  capabilities?: TargetCapability[];
 }
 
-interface TargetSearchResponse {
-  data?: {
-    search?: {
-      products?: TargetProduct[];
+interface TargetAddress {
+  address_context_code?: unknown;
+  address_line1?: unknown;
+  address_line_1?: unknown;
+  city?: unknown;
+  region?: unknown;
+  state?: unknown;
+  postal_code?: unknown;
+  zip_code?: unknown;
+}
+
+interface TargetCapability {
+  capability_code?: unknown;
+  capability_name?: unknown;
+  latitude?: unknown;
+  longitude?: unknown;
+}
+
+interface TargetCduiSearchResponse {
+  data_source_modules?: Array<{
+    module_data?: {
+      search_response?: {
+        products?: TargetProduct[];
+      };
     };
-  };
-}
-
-interface TargetProductResponse {
-  data?: {
-    product?: TargetProduct;
-  };
+  }>;
 }
 
 interface TargetProduct {
@@ -92,6 +105,11 @@ interface TargetProduct {
     enrichment?: {
       images?: {
         primary_image_url?: unknown;
+      };
+      image_info?: {
+        primary_image?: {
+          url?: unknown;
+        };
       };
     };
     package_dimensions?: {
@@ -109,6 +127,7 @@ export class TargetCollector implements Collector {
 
   private readonly configuredApiKey: string | null;
   private readonly fetchImpl: typeof fetch;
+  private readonly locationCache = new Map<string, TargetPublicLocation>();
 
   constructor(options: TargetCollectorOptions = {}) {
     this.configuredApiKey =
@@ -121,38 +140,39 @@ export class TargetCollector implements Collector {
   }
 
   async findStores(zip: string): Promise<CollectedStore[]> {
-    const params = new URLSearchParams({
-      limit: "10",
-      within: "20",
-      place: zip,
-      channel: "WEB",
-    });
-    const payload = await this.request<TargetNearbyStoresResponse>("/nearby_stores_v1", params);
-    const stores = payload.data?.nearby_stores?.stores;
+    const payload = await this.requestWithApiKey<TargetPreferredStoresResponse>((apiKey) =>
+      buildUrl(`${TARGET_API_PLATFORM_BASE_URL}/location_fulfillment_aggregations/v1/preferred_stores`, {
+        key: apiKey,
+        zipcode: zip,
+      }),
+    );
+    const stores = payload.preferred_stores;
 
     if (!Array.isArray(stores)) {
-      throw new CollectorError(this.chain, "parse", "Target stores response missing stores array");
+      throw new CollectorError(
+        this.chain,
+        "parse",
+        "Target preferred stores response missing stores array",
+      );
     }
 
-    return stores.map((store) => this.mapStore(store));
+    const mappedStores: CollectedStore[] = [];
+    for (const store of stores.slice(0, 10)) {
+      const externalLocationId = requiredString(store.location_id, "location_id");
+      const hydratedStore = await this.getStoreLocation(externalLocationId);
+      if (isGroceryStore(hydratedStore)) {
+        mappedStores.push(this.mapStore(hydratedStore));
+      }
+    }
+
+    return mappedStores;
   }
 
   async searchProducts(term: string, externalLocationId: string): Promise<CollectedProduct[]> {
-    const params = new URLSearchParams({
-      keyword: term,
-      count: "20",
-      offset: "0",
-      pricing_store_id: externalLocationId,
-      channel: "WEB",
-    });
-    const payload = await this.request<TargetSearchResponse>("/plp_search_v2", params);
-    const products = payload.data?.search?.products;
+    const store = await this.getStoreLocation(externalLocationId);
+    const payload = await this.searchCdui(term, store);
 
-    if (!Array.isArray(products)) {
-      throw new CollectorError(this.chain, "parse", "Target search response missing products array");
-    }
-
-    return this.mapProducts(products);
+    return this.mapProducts(readSearchProducts(payload));
   }
 
   async getPrices(
@@ -163,94 +183,132 @@ export class TargetCollector implements Collector {
       return [];
     }
 
-    const batches: TargetProduct[][] = [];
-    for (let index = 0; index < externalProductIds.length; index += 5) {
-      const batchIds = externalProductIds.slice(index, index + 5);
-      const batchProducts = await Promise.all(
-        batchIds.map((externalProductId) => this.getProduct(externalProductId, externalLocationId)),
-      );
-      batches.push(batchProducts.filter((product): product is TargetProduct => product !== null));
+    const store = await this.getStoreLocation(externalLocationId);
+    const products: TargetProduct[] = [];
+
+    for (const externalProductId of externalProductIds) {
+      const payload = await this.searchCdui(externalProductId, store);
+      const matchingProduct =
+        readSearchProducts(payload).find(
+          (product) => optionalString(product.tcin) === externalProductId,
+        ) ?? null;
+
+      if (matchingProduct) {
+        products.push(matchingProduct);
+      }
     }
 
-    return this.mapProducts(batches.flat());
+    return this.mapProducts(products);
   }
 
-  private async getProduct(
-    externalProductId: string,
-    externalLocationId: string,
-  ): Promise<TargetProduct | null> {
-    const params = new URLSearchParams({
-      tcin: externalProductId,
-      pricing_store_id: externalLocationId,
-    });
-    const payload = await this.request<TargetProductResponse | null>("/pdp_client_v1", params, {
-      allowNotFound: true,
-    });
-
-    if (payload === null) {
-      return null;
+  private async getStoreLocation(externalLocationId: string): Promise<TargetPublicLocation> {
+    const cached = this.locationCache.get(externalLocationId);
+    if (cached) {
+      return cached;
     }
 
-    const product = payload.data?.product;
-    if (!product) {
-      throw new CollectorError(this.chain, "parse", "Target product response missing product");
-    }
+    const store = await this.requestWithApiKey<TargetPublicLocation>((apiKey) =>
+      buildUrl(
+        `${TARGET_API_PLATFORM_BASE_URL}/locations/v3/public/${encodeURIComponent(externalLocationId)}`,
+        { key: apiKey },
+      ),
+    );
 
-    return product;
+    this.locationCache.set(externalLocationId, store);
+    return store;
   }
 
-  private async request<T>(
-    path: string,
-    params: URLSearchParams,
-    options: { allowNotFound?: boolean } = {},
+  private async searchCdui(
+    term: string,
+    store: TargetPublicLocation,
+  ): Promise<TargetCduiSearchResponse> {
+    const externalLocationId = this.readStoreId(store);
+    const address = readStoreAddress(store);
+    const zip = requiredString(
+      firstPresent(address?.postal_code, address?.zip_code),
+      "address.postal_code",
+    );
+    const region = requiredString(firstPresent(address?.region, address?.state), "address.region");
+    const latitude = readLatitude(store);
+    const longitude = readLongitude(store);
+    const page = targetSearchPage(term);
+    const searchTerm = term.trim().replace(/\s+/g, " ");
+
+    return this.requestWithApiKey<TargetCduiSearchResponse>((apiKey) =>
+      buildUrl(`${TARGET_CDUI_BASE_URL}/cdui_orchestrations/v1/pages/slp`, {
+        key: apiKey,
+        platform: "WEB",
+        privacy_do_not_sell: "false",
+        targeted_advertising_opt_out: "false",
+        device_type: "desktop",
+        sapphire_channel: "WEB",
+        sapphire_page: page,
+        channel: "WEB",
+        page,
+        visitor_id: TARGET_VISITOR_ID,
+        purchasable_store_ids: externalLocationId,
+        latitude: String(latitude),
+        longitude: String(longitude),
+        scheduled_delivery_store_id: externalLocationId,
+        scheduled_delivery_zip_code: firstFiveZip(zip),
+        state: region,
+        store_id: externalLocationId,
+        zip: firstFiveZip(zip),
+        has_pending_inputs: "false",
+        count: String(TARGET_SEARCH_COUNT),
+        default_purchasability_filter: "true",
+        include_sponsored: "false",
+        new_search: "true",
+        offset: "0",
+        spellcheck: "true",
+        store_ids: externalLocationId,
+        keyword: searchTerm,
+        is_seo_bot: "false",
+        include_data_source_modules: "true",
+        query_string: `searchTerm=${searchTerm}`,
+        timezone: optionalString(store.geographic_specifications?.iso_time_zone_code) ?? "America/New_York",
+      }),
+    );
+  }
+
+  private async requestWithApiKey<T>(
+    buildRequestUrl: (apiKey: string) => string,
     didRetryRateLimit = false,
     didRetryAuth = false,
-    forcedApiKey?: string,
   ): Promise<T> {
-    const apiKey = forcedApiKey ?? (await this.resolveApiKey());
-    const response = await this.fetchImpl(this.buildUrl(path, params, apiKey), {
+    const apiKey = didRetryAuth
+      ? await resolveWebKey(this.fetchImpl, { forceRefresh: true })
+      : await this.resolveApiKey();
+    const response = await this.fetchImpl(buildRequestUrl(apiKey), {
       headers: {
         Accept: "application/json",
         "User-Agent": TARGET_USER_AGENT,
       },
     });
 
-    if (response.status === 404 && options.allowNotFound) {
-      return null as T;
-    }
-
     if (response.status === 429) {
       if (!didRetryRateLimit) {
         await sleep(getRetryDelayMs(response.headers.get("retry-after")));
-        return this.request<T>(path, params, options, true, didRetryAuth, apiKey);
+        return this.requestWithApiKey<T>(buildRequestUrl, true, didRetryAuth);
       }
 
-      throw new CollectorError(this.chain, "rate-limit", "Target RedSky API rate limit exceeded");
+      throw new CollectorError(this.chain, "rate-limit", "Target API rate limit exceeded");
     }
 
-    if (response.status === 403) {
+    if (response.status === 401 || response.status === 403) {
       if (didRetryAuth) {
-        throw new CollectorError(this.chain, "auth", "Target RedSky API authentication failed");
+        throw new CollectorError(this.chain, "auth", "Target API authentication failed");
       }
 
       invalidateTargetWebKeyCache();
-      let refreshedApiKey: string;
-      try {
-        refreshedApiKey = await resolveWebKey(this.fetchImpl, { forceRefresh: true });
-      } catch (error) {
-        throw new CollectorError(this.chain, "auth", "Target RedSky API key refresh failed", {
-          cause: error,
-        });
-      }
-
-      return this.request<T>(path, params, options, false, true, refreshedApiKey);
+      return this.requestWithApiKey<T>(buildRequestUrl, didRetryRateLimit, true);
     }
 
     if (!response.ok) {
       throw new CollectorError(
         this.chain,
         "upstream",
-        `Target RedSky API request failed with status ${response.status}`,
+        `Target API request failed with status ${response.status}`,
       );
     }
 
@@ -269,53 +327,37 @@ export class TargetCollector implements Collector {
         return DEFAULT_TARGET_API_KEY;
       }
 
-      throw new CollectorError(this.chain, "auth", "Target RedSky API key is not configured");
+      throw new CollectorError(this.chain, "auth", "Target API key is not configured");
     }
-  }
-
-  private buildUrl(path: string, params: URLSearchParams, apiKey: string): string {
-    const requestParams = new URLSearchParams(params);
-    requestParams.set("key", apiKey);
-    requestParams.set("visitor_id", TARGET_VISITOR_ID);
-
-    return `${TARGET_BASE_URL}${path}?${requestParams}`;
   }
 
   private async readJson<T>(response: Response): Promise<T> {
     try {
       return (await response.json()) as T;
     } catch (error) {
-      throw new CollectorError(this.chain, "parse", "Target RedSky API returned invalid JSON", {
+      throw new CollectorError(this.chain, "parse", "Target API returned invalid JSON", {
         cause: error,
       });
     }
   }
 
-  private mapStore(store: TargetStore): CollectedStore {
-    const externalLocationId = requiredString(
-      firstPresent(store.store_id, store.location_id),
-      "store_id",
+  private readStoreId(store: TargetPublicLocation): string {
+    return requiredString(firstPresent(store.location_id, store.store_id), "location_id");
+  }
+
+  private mapStore(store: TargetPublicLocation): CollectedStore {
+    const externalLocationId = this.readStoreId(store);
+    const name = requiredString(
+      firstPresent(readLocationName(store.location_names), store.location_name, store.name),
+      "location_name",
     );
-    const name = requiredString(firstPresent(store.location_name, store.name), "location_name");
-    const address = store.mailing_address ?? store.address;
+    const address = readStoreAddress(store);
     const zip = requiredString(
       firstPresent(address?.postal_code, address?.zip_code),
-      "mailing_address.postal_code",
+      "address.postal_code",
     );
-    const latitude = requiredNumber(
-      firstPresent(
-        store.geographic_specifications?.latitude,
-        store.geolocation?.latitude,
-      ),
-      "geographic_specifications.latitude",
-    );
-    const longitude = requiredNumber(
-      firstPresent(
-        store.geographic_specifications?.longitude,
-        store.geolocation?.longitude,
-      ),
-      "geographic_specifications.longitude",
-    );
+    const latitude = readLatitude(store);
+    const longitude = readLongitude(store);
     const addressLine = optionalString(firstPresent(address?.address_line1, address?.address_line_1));
     const region = optionalString(firstPresent(address?.region, address?.state));
     const addressParts = [
@@ -349,7 +391,12 @@ export class TargetCollector implements Collector {
         sizeRaw: sizeFromTitle(name) ?? sizeFromWeight(product.item?.package_dimensions?.weight),
         upc: null,
         category: null,
-        imageUrl: optionalString(product.item?.enrichment?.images?.primary_image_url),
+        imageUrl: optionalString(
+          firstPresent(
+            product.item?.enrichment?.images?.primary_image_url,
+            product.item?.enrichment?.image_info?.primary_image?.url,
+          ),
+        ),
         price,
         promoPrice,
         capturedAt,
@@ -433,7 +480,118 @@ function mapPrice(price: TargetProduct["price"]): { price: number | null; promoP
   return { price: currentRetail, promoPrice: null };
 }
 
+function readSearchProducts(payload: TargetCduiSearchResponse): TargetProduct[] {
+  for (const module of payload.data_source_modules ?? []) {
+    const products = module.module_data?.search_response?.products;
+
+    if (Array.isArray(products)) {
+      return products;
+    }
+  }
+
+  throw new CollectorError("target", "parse", "Target search response missing products array");
+}
+
+function readStoreAddress(store: TargetPublicLocation): TargetAddress {
+  if (Array.isArray(store.address)) {
+    const mailingAddress =
+      store.address.find(
+        (address) => optionalString(address.address_context_code)?.toLowerCase() === "m",
+      ) ?? store.address[0];
+
+    if (mailingAddress) {
+      return mailingAddress;
+    }
+  }
+
+  if (store.address && !Array.isArray(store.address)) {
+    return store.address;
+  }
+
+  if (store.mailing_address) {
+    return store.mailing_address;
+  }
+
+  throw new CollectorError("target", "parse", "Target response missing address");
+}
+
+function readLocationName(locationNames: TargetLocationName[] | undefined): string | null {
+  if (!Array.isArray(locationNames)) {
+    return null;
+  }
+
+  const projectName =
+    locationNames.find(
+      (locationName) => optionalString(locationName.name_type)?.toLowerCase() === "proj name",
+    ) ?? locationNames[0];
+
+  return optionalString(projectName?.name);
+}
+
+function readLatitude(store: TargetPublicLocation): number {
+  return requiredNumber(
+    firstPresent(
+      store.geographic_specifications?.latitude,
+      store.geofence?.latitude,
+      store.geolocation?.latitude,
+      readCapabilityCoordinate(store, "latitude"),
+    ),
+    "geographic_specifications.latitude",
+  );
+}
+
+function readLongitude(store: TargetPublicLocation): number {
+  return requiredNumber(
+    firstPresent(
+      store.geographic_specifications?.longitude,
+      store.geofence?.longitude,
+      store.geolocation?.longitude,
+      readCapabilityCoordinate(store, "longitude"),
+    ),
+    "geographic_specifications.longitude",
+  );
+}
+
+function readCapabilityCoordinate(
+  store: TargetPublicLocation,
+  coordinate: "latitude" | "longitude",
+): unknown {
+  return store.capabilities?.find((capability) => capability[coordinate] !== undefined)?.[
+    coordinate
+  ];
+}
+
+function isGroceryStore(store: TargetPublicLocation): boolean {
+  if (!Array.isArray(store.capabilities)) {
+    return true;
+  }
+
+  return store.capabilities.some((capability) => {
+    const code = optionalString(capability.capability_code)?.toLowerCase() ?? "";
+    const name = optionalString(capability.capability_name)?.toLowerCase() ?? "";
+
+    return code.includes("grocery") || name.includes("grocery");
+  });
+}
+
+function targetSearchPage(term: string): string {
+  return `/s/${term.trim().replace(/\s+/g, " ")}`;
+}
+
+function buildUrl(baseUrl: string, params: Record<string, string>): string {
+  const url = new URL(baseUrl);
+  for (const [key, value] of Object.entries(params)) {
+    url.searchParams.set(key, value);
+  }
+
+  return url.toString();
+}
+
 function requiredString(value: unknown, field: string): string {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+
   if (typeof value !== "string" || value.length === 0) {
     throw new CollectorError("target", "parse", `Target response missing ${field}`);
   }
@@ -476,9 +634,13 @@ function firstPresent(...values: unknown[]): unknown {
   return values.find((value) => value !== undefined && value !== null);
 }
 
+function firstFiveZip(zip: string): string {
+  return zip.match(/\d{5}/)?.[0] ?? zip;
+}
+
 function sizeFromTitle(title: string): string | null {
   const match = title.match(
-    /(?:^|[\s(-])(\d+(?:\.\d+)?)\s*(fl\s*oz|floz|oz|ounce|ounces|ct|count|counts|lb|lbs|pound|pounds|g|gram|grams|ml|milliliter|milliliters|l|liter|liters|gal|gallon|gallons)\.?\)?$/i,
+    /(?:^|[\s(-])(\d+(?:\.\d+)?)\s*(fl\s*oz|floz|oz|ounce|ounces|ct|count|counts|lb|lbs|pound|pounds|g|gram|grams|ml|milliliter|milliliters|l|liter|liters|gal|gallon|gallons)\.?\)?(?:\s|$)/i,
   );
 
   if (!match?.[1] || !match[2]) {
