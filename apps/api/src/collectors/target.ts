@@ -1,17 +1,19 @@
 import { randomBytes } from "node:crypto";
 
 import type { CollectedProduct, CollectedStore, Collector } from "./types.js";
+import type { CollectorHttp } from "./http.js";
+import { createCollectorHttp, getRetryDelayMs, sleep } from "./http.js";
 import { CollectorError } from "./types.js";
 
 const TARGET_HOME_URL = "https://www.target.com/";
 const TARGET_API_PLATFORM_BASE_URL = "https://api.target.com";
 const TARGET_CDUI_BASE_URL = "https://cdui-orchestrations.target.com";
 const DEFAULT_TARGET_API_KEY = "9f36aeafbe60771e321a7cc95a78140772ab3e96";
-const DEFAULT_RATE_LIMIT_BACKOFF_MS = 250;
 const WEB_KEY_CACHE_TTL_MS = 24 * 60 * 60 * 1_000;
 const TARGET_VISITOR_ID = randomBytes(16).toString("hex").toUpperCase();
 const TARGET_USER_AGENT = "Mozilla/5.0";
 const TARGET_SEARCH_COUNT = 24;
+const TARGET_PRICE_LOOKUP_CONCURRENCY = 2;
 const WEB_KEY_REGEXES = [
   /"apiKey":"([a-f0-9]{40})"/,
   /key=([a-f0-9]{40})/,
@@ -20,6 +22,7 @@ const WEB_KEY_REGEXES = [
 
 let cachedWebKey: string | null = null;
 let cachedWebKeyExpiresAt = 0;
+let webKeyRefreshPromise: Promise<string> | null = null;
 
 interface TargetCollectorOptions {
   apiKey?: string;
@@ -127,6 +130,7 @@ export class TargetCollector implements Collector {
 
   private readonly configuredApiKey: string | null;
   private readonly fetchImpl: typeof fetch;
+  private readonly http: CollectorHttp;
   private readonly locationCache = new Map<string, TargetPublicLocation>();
 
   constructor(options: TargetCollectorOptions = {}) {
@@ -137,6 +141,12 @@ export class TargetCollector implements Collector {
     if (!this.fetchImpl) {
       throw new Error("TargetCollector requires a fetch implementation");
     }
+
+    this.http = createCollectorHttp({
+      chain: this.chain,
+      fetch: this.fetchImpl,
+      headers: { "User-Agent": TARGET_USER_AGENT },
+    });
   }
 
   async findStores(zip: string): Promise<CollectedStore[]> {
@@ -184,21 +194,20 @@ export class TargetCollector implements Collector {
     }
 
     const store = await this.getStoreLocation(externalLocationId);
-    const products: TargetProduct[] = [];
-
-    for (const externalProductId of externalProductIds) {
-      const payload = await this.searchCdui(externalProductId, store);
-      const matchingProduct =
-        readSearchProducts(payload).find(
+    const products = await mapWithConcurrency(
+      externalProductIds,
+      TARGET_PRICE_LOOKUP_CONCURRENCY,
+      async (externalProductId) => {
+        const payload = await this.searchCdui(externalProductId, store);
+        return readSearchProducts(payload).find(
           (product) => optionalString(product.tcin) === externalProductId,
         ) ?? null;
+      },
+    );
 
-      if (matchingProduct) {
-        products.push(matchingProduct);
-      }
-    }
-
-    return this.mapProducts(products);
+    return this.mapProducts(
+      products.filter((product): product is TargetProduct => product !== null),
+    );
   }
 
   private async getStoreLocation(externalLocationId: string): Promise<TargetPublicLocation> {
@@ -279,7 +288,7 @@ export class TargetCollector implements Collector {
     const apiKey = didRetryAuth
       ? await resolveWebKey(this.fetchImpl, { forceRefresh: true })
       : await this.resolveApiKey();
-    const response = await this.fetchImpl(buildRequestUrl(apiKey), {
+    const response = await this.http.request(buildRequestUrl(apiKey), {
       headers: {
         Accept: "application/json",
         "User-Agent": TARGET_USER_AGENT,
@@ -288,7 +297,12 @@ export class TargetCollector implements Collector {
 
     if (response.status === 429) {
       if (!didRetryRateLimit) {
-        await sleep(getRetryDelayMs(response.headers.get("retry-after")));
+        const retryDelayMs = getRetryDelayMs(response.headers.get("retry-after"));
+        if (retryDelayMs === null) {
+          throw new CollectorError(this.chain, "rate-limit", "Target API rate limit exceeded");
+        }
+
+        await sleep(retryDelayMs);
         return this.requestWithApiKey<T>(buildRequestUrl, true, didRetryAuth);
       }
 
@@ -420,9 +434,27 @@ export async function resolveWebKey(
     }
   }
 
+  if (webKeyRefreshPromise) {
+    return webKeyRefreshPromise;
+  }
+
+  webKeyRefreshPromise = fetchTargetWebKey(fetchImpl).finally(() => {
+    webKeyRefreshPromise = null;
+  });
+
+  return webKeyRefreshPromise;
+}
+
+async function fetchTargetWebKey(fetchImpl: typeof fetch): Promise<string> {
+  const http = createCollectorHttp({
+    chain: "target",
+    fetch: fetchImpl,
+    headers: { "User-Agent": TARGET_USER_AGENT },
+  });
   let response: Response;
+
   try {
-    response = await fetchImpl(TARGET_HOME_URL, {
+    response = await http.request(TARGET_HOME_URL, {
       headers: {
         Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
@@ -442,7 +474,15 @@ export async function resolveWebKey(
     );
   }
 
-  const html = await response.text();
+  let html: string;
+  try {
+    html = await response.text();
+  } catch (error) {
+    throw new CollectorError("target", "parse", "Target web key response was unreadable", {
+      cause: error,
+    });
+  }
+
   for (const regex of WEB_KEY_REGEXES) {
     const key = html.match(regex)?.[1];
 
@@ -466,8 +506,8 @@ function getCachedWebKey(): string | null {
 }
 
 function mapPrice(price: TargetProduct["price"]): { price: number | null; promoPrice: number | null } {
-  const currentRetail = optionalNumber(price?.current_retail);
-  const regularRetail = optionalNumber(price?.reg_retail);
+  const currentRetail = optionalPositiveNumber(price?.current_retail);
+  const regularRetail = optionalPositiveNumber(price?.reg_retail);
 
   if (currentRetail === null) {
     return { price: null, promoPrice: null };
@@ -630,6 +670,35 @@ function optionalNumber(value: unknown): number | null {
   return null;
 }
 
+function optionalPositiveNumber(value: unknown): number | null {
+  const numberValue = optionalNumber(value);
+  return numberValue !== null && numberValue > 0 ? numberValue : null;
+}
+
+async function mapWithConcurrency<T, U>(
+  values: T[],
+  concurrency: number,
+  mapper: (value: T) => Promise<U>,
+): Promise<U[]> {
+  const results = new Array<U>(values.length);
+  let nextIndex = 0;
+
+  async function worker(): Promise<void> {
+    while (nextIndex < values.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await mapper(values[index] as T);
+    }
+  }
+
+  const workers = Array.from(
+    { length: Math.min(concurrency, values.length) },
+    () => worker(),
+  );
+  await Promise.all(workers);
+  return results;
+}
+
 function firstPresent(...values: unknown[]): unknown {
   return values.find((value) => value !== undefined && value !== null);
 }
@@ -704,28 +773,4 @@ function decodeHtml(value: string): string {
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
-}
-
-function getRetryDelayMs(retryAfter: string | null): number {
-  if (!retryAfter) {
-    return DEFAULT_RATE_LIMIT_BACKOFF_MS;
-  }
-
-  const seconds = Number(retryAfter);
-  if (Number.isFinite(seconds)) {
-    return Math.max(0, seconds * 1_000);
-  }
-
-  const retryAt = Date.parse(retryAfter);
-  if (Number.isFinite(retryAt)) {
-    return Math.max(0, retryAt - Date.now());
-  }
-
-  return DEFAULT_RATE_LIMIT_BACKOFF_MS;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
 }

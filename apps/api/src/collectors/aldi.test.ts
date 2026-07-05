@@ -104,6 +104,49 @@ describe("AldiCollector", () => {
     vi.useRealTimers();
   });
 
+  it("maps zero and negative ALDI prices to null", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-04T12:00:00Z"));
+    const fetchMock = queuedFetch([
+      htmlResponse(storefrontState()),
+      jsonResponse({
+        data: {
+          searchResults: {
+            primaryItemResultList: {
+              items: [
+                aldiItem({
+                  id: "items_20727-zero",
+                  name: "Zero Price Item",
+                  priceString: "$0.00",
+                }),
+                aldiItem({
+                  id: "items_20727-negative",
+                  name: "Negative Price Item",
+                  priceString: "$-1.00",
+                }),
+              ],
+            },
+          },
+        },
+      }),
+    ]);
+    const collector = aldiCollector(fetchMock);
+
+    await expect(collector.searchProducts("milk", "20727:92766:78:45202")).resolves.toMatchObject([
+      {
+        externalProductId: "items_20727-zero",
+        price: null,
+        promoPrice: null,
+      },
+      {
+        externalProductId: "items_20727-negative",
+        price: null,
+        promoPrice: null,
+      },
+    ]);
+    vi.useRealTimers();
+  });
+
   it("hydrates item details and prices for price refreshes", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-04T12:00:00Z"));
@@ -159,8 +202,83 @@ describe("AldiCollector", () => {
     vi.useRealTimers();
   });
 
+  it("shares one storefront session fetch across concurrent cold calls", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (url) => {
+      if (String(url).includes("/store/aldi/storefront")) {
+        return htmlResponse(storefrontState());
+      }
+
+      return jsonResponse({
+        data: {
+          searchResults: {
+            primaryItemResultList: {
+              items: [],
+            },
+          },
+        },
+      });
+    });
+    const collector = aldiCollector(fetchMock);
+
+    await Promise.all([
+      collector.searchProducts("milk", "20727:92766:78:45202"),
+      collector.searchProducts("eggs", "20727:92766:78:45202"),
+      collector.searchProducts("bread", "20727:92766:78:45202"),
+    ]);
+
+    const storefrontCalls = fetchMock.mock.calls.filter(([url]) =>
+      String(url).includes("/store/aldi/storefront"),
+    );
+    expect(storefrontCalls).toHaveLength(1);
+  });
+
+  it("refreshes the storefront session once after GraphQL auth failure", async () => {
+    const fetchMock = queuedFetch([
+      htmlResponse(storefrontState("stale-token")),
+      new Response(null, { status: 403 }),
+      htmlResponse(storefrontState("fresh-token")),
+      jsonResponse({
+        data: {
+          searchResults: {
+            primaryItemResultList: {
+              items: [],
+            },
+          },
+        },
+      }),
+    ]);
+    const collector = aldiCollector(fetchMock);
+
+    await expect(collector.searchProducts("milk", "20727:92766:78:45202")).resolves.toEqual([]);
+
+    const graphqlCalls = fetchMock.mock.calls.filter(([url]) => String(url).includes("/graphql"));
+    expect(graphqlCalls).toHaveLength(2);
+    expect(graphqlCalls[0]?.[1]?.headers).toMatchObject({ Authorization: "Bearer stale-token" });
+    expect(graphqlCalls[1]?.[1]?.headers).toMatchObject({ Authorization: "Bearer fresh-token" });
+  });
+
+  it("fails fast on ALDI 429 responses with long Retry-After values", async () => {
+    const fetchMock = queuedFetch([
+      htmlResponse(storefrontState()),
+      new Response(null, { status: 429, headers: { "Retry-After": "86400" } }),
+    ]);
+    const collector = aldiCollector(fetchMock);
+
+    await expect(collector.searchProducts("milk", "20727:92766:78:45202")).rejects.toMatchObject({
+      kind: "rate-limit",
+    });
+
+    const graphqlCalls = fetchMock.mock.calls.filter(([url]) => String(url).includes("/graphql"));
+    expect(graphqlCalls).toHaveLength(1);
+  });
+
   it("maps ALDI auth failures", async () => {
-    const fetchMock = queuedFetch([htmlResponse(storefrontState()), new Response(null, { status: 403 })]);
+    const fetchMock = queuedFetch([
+      htmlResponse(storefrontState("stale-token")),
+      new Response(null, { status: 403 }),
+      htmlResponse(storefrontState("fresh-token")),
+      new Response(null, { status: 403 }),
+    ]);
     const collector = aldiCollector(fetchMock);
 
     await expect(collector.searchProducts("milk", "20727:92766:78:45202")).rejects.toMatchObject({
@@ -177,13 +295,13 @@ function aldiCollector(fetchMock: ReturnType<typeof queuedFetch>): AldiCollector
   });
 }
 
-function storefrontState() {
+function storefrontState(token = "guest-token") {
   return {
     CreateImplicitGuestUser: {
       "{}": {
         createImplicitGuestUser: {
           authToken: {
-            token: "guest-token",
+            token,
             expires: "2026-08-03T12:00:00Z",
           },
         },

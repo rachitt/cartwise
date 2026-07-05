@@ -1,10 +1,13 @@
 import { createSign, randomUUID } from "node:crypto";
 
 import type { CollectedProduct, CollectedStore, Collector } from "./types.js";
+import type { CollectorHttp } from "./http.js";
+import { createCollectorHttp } from "./http.js";
 import { CollectorError } from "./types.js";
 
 const DEFAULT_BASE_URL = "https://developer.api.walmart.com/api-proxy/service/affil/product/v2";
 const DEFAULT_KEY_VERSION = "1";
+const WALMART_PRICE_LOOKUP_CONCURRENCY = 2;
 
 interface WalmartCollectorOptions {
   consumerId?: string;
@@ -41,6 +44,7 @@ export class WalmartCollector implements Collector {
   private readonly publisherId: string | null;
   private readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;
+  private readonly http: CollectorHttp;
   private readonly now: () => number;
 
   constructor(options: WalmartCollectorOptions = {}) {
@@ -64,6 +68,8 @@ export class WalmartCollector implements Collector {
     if (!this.fetchImpl) {
       throw new Error("WalmartCollector requires a fetch implementation");
     }
+
+    this.http = createCollectorHttp({ chain: this.chain, fetch: this.fetchImpl, now: this.now });
   }
 
   async findStores(zip: string): Promise<CollectedStore[]> {
@@ -97,16 +103,13 @@ export class WalmartCollector implements Collector {
     externalProductIds: string[],
     externalLocationId: string,
   ): Promise<CollectedProduct[]> {
-    const products: WalmartObject[] = [];
+    const products = await mapWithConcurrency(
+      externalProductIds,
+      WALMART_PRICE_LOOKUP_CONCURRENCY,
+      (externalProductId) => this.getProduct(externalProductId, externalLocationId),
+    );
 
-    for (const externalProductId of externalProductIds) {
-      const product = await this.getProduct(externalProductId, externalLocationId);
-      if (product) {
-        products.push(product);
-      }
-    }
-
-    return this.mapProducts(products);
+    return this.mapProducts(products.filter((product): product is WalmartObject => product !== null));
   }
 
   private async getProduct(
@@ -132,7 +135,7 @@ export class WalmartCollector implements Collector {
     options: { allowNotFound?: boolean } = {},
   ): Promise<T> {
     const url = this.buildUrl(path, query);
-    const response = await this.fetchImpl(url, {
+    const response = await this.http.request(url, {
       headers: this.authHeaders(),
     });
 
@@ -248,7 +251,7 @@ export class WalmartCollector implements Collector {
 
     return products.map((product) => {
       const currentPrice = priceFromProduct(product);
-      const comparisonPrice = optionalNumber(
+      const comparisonPrice = optionalPositiveNumber(
         firstPresent(product.msrp, product.listPrice, product.wasPrice),
       );
 
@@ -288,7 +291,7 @@ function priceFromProduct(product: WalmartObject): number | null {
   const currentPrice = firstPresent(product.salePrice, product.price, product.currentPrice);
 
   if (typeof currentPrice === "object" && currentPrice !== null) {
-    return optionalNumber(
+    return optionalPositiveNumber(
       firstPresent(
         (currentPrice as WalmartObject).price,
         (currentPrice as WalmartObject).amount,
@@ -297,7 +300,7 @@ function priceFromProduct(product: WalmartObject): number | null {
     );
   }
 
-  return optionalNumber(currentPrice);
+  return optionalPositiveNumber(currentPrice);
 }
 
 function requiredString(value: unknown, field: string): string {
@@ -343,6 +346,35 @@ function optionalNumber(value: unknown): number | null {
   }
 
   return null;
+}
+
+function optionalPositiveNumber(value: unknown): number | null {
+  const numberValue = optionalNumber(value);
+  return numberValue !== null && numberValue > 0 ? numberValue : null;
+}
+
+async function mapWithConcurrency<T, U>(
+  values: T[],
+  concurrency: number,
+  mapper: (value: T) => Promise<U>,
+): Promise<U[]> {
+  const results = new Array<U>(values.length);
+  let nextIndex = 0;
+
+  async function worker(): Promise<void> {
+    while (nextIndex < values.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await mapper(values[index] as T);
+    }
+  }
+
+  const workers = Array.from(
+    { length: Math.min(concurrency, values.length) },
+    () => worker(),
+  );
+  await Promise.all(workers);
+  return results;
 }
 
 function firstArray(...values: unknown[]): unknown[] | null {
