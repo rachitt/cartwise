@@ -270,54 +270,62 @@ export default function SearchScreen() {
                       { borderBottomColor: theme.border },
                       index === sortedPricedResults.length - 1 && styles.lastResultItem,
                     ]}>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={`${
-                        isExpanded ? 'Hide' : 'Show'
-                      } store prices for ${result.product.name}`}
-                      accessibilityState={{ expanded: isExpanded }}
-                      onPress={() => toggleResult(result.product.id)}
-                      style={({ pressed }) => [styles.resultToggle, pressed && styles.pressed]}>
-                      <View style={[styles.productImage, { backgroundColor: theme.accentMuted }]}>
-                        {result.product.imageUrl ? (
-                          <Image source={result.product.imageUrl} style={styles.image} />
-                        ) : (
-                          <ThemedText type="smallBold" themeColor="accent">
-                            {result.product.name.slice(0, 1)}
+                    <View style={styles.resultRow}>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={`${
+                          isExpanded ? 'Hide' : 'Show'
+                        } store prices for ${result.product.name}`}
+                        accessibilityState={{ expanded: isExpanded }}
+                        onPress={() => toggleResult(result.product.id)}
+                        style={({ pressed }) => [styles.resultToggle, pressed && styles.pressed]}>
+                        <View style={[styles.productImage, { backgroundColor: theme.accentMuted }]}>
+                          {result.product.imageUrl ? (
+                            <Image source={result.product.imageUrl} style={styles.image} />
+                          ) : (
+                            <ThemedText type="smallBold" themeColor="accent">
+                              {result.product.name.slice(0, 1)}
+                            </ThemedText>
+                          )}
+                        </View>
+                        <View style={styles.resultCopy}>
+                          <ThemedText type="smallBold" numberOfLines={1}>
+                            {result.product.name}
                           </ThemedText>
-                        )}
-                      </View>
-                      <View style={styles.resultCopy}>
-                        <ThemedText type="smallBold" numberOfLines={1}>
-                          {result.product.name}
-                        </ThemedText>
-                        <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
-                          {metaLabel}
-                        </ThemedText>
-                        <ThemedText
-                          type="smallBold"
-                          numberOfLines={1}
-                          style={styles.compactPriceLine}>
-                          {cheapestPriceLabel ? (
+                          <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
+                            {metaLabel}
+                          </ThemedText>
+                          <ThemedText
+                            type="smallBold"
+                            numberOfLines={1}
+                            style={styles.compactPriceLine}>
+                            {cheapestPriceLabel ? (
+                              <ThemedText
+                                type="smallBold"
+                                themeColor="accent"
+                                style={styles.compactPriceLine}>
+                                {cheapestPriceLabel}
+                              </ThemedText>
+                            ) : null}
+                            {priceDetail}
+                          </ThemedText>
+                          {cheapest ? (
                             <ThemedText
-                              type="smallBold"
-                              themeColor="accent"
-                              style={styles.compactPriceLine}>
-                              {cheapestPriceLabel}
+                              type="small"
+                              themeColor="textSecondary"
+                              numberOfLines={1}
+                              style={styles.compactFreshness}>
+                              {formatFreshnessStamp(cheapest.price.capturedAt)}
                             </ThemedText>
                           ) : null}
-                          {priceDetail}
+                        </View>
+                        <ThemedText
+                          type="smallBold"
+                          themeColor="textSecondary"
+                          style={[styles.chevron, isExpanded && styles.chevronExpanded]}>
+                          {'>'}
                         </ThemedText>
-                        {cheapest ? (
-                          <ThemedText
-                            type="small"
-                            themeColor="textSecondary"
-                            numberOfLines={1}
-                            style={styles.compactFreshness}>
-                            {formatFreshnessStamp(cheapest.price.capturedAt)}
-                          </ThemedText>
-                        ) : null}
-                      </View>
+                      </Pressable>
                       <View style={styles.resultActions}>
                         <AddToCartControl
                           disabled={updateCartItem.isPending}
@@ -328,14 +336,8 @@ export default function SearchScreen() {
                             updateCartItem.mutate({ productId: result.product.id, qty: nextQty })
                           }
                         />
-                        <ThemedText
-                          type="smallBold"
-                          themeColor="textSecondary"
-                          style={[styles.chevron, isExpanded && styles.chevronExpanded]}>
-                          {'>'}
-                        </ThemedText>
                       </View>
-                    </Pressable>
+                    </View>
 
                     {isExpanded ? (
                       <View style={[styles.priceTable, { borderTopColor: theme.border }]}>
@@ -427,9 +429,7 @@ function AddToCartControl({
 
   if (qty > 0) {
     return (
-      <View onTouchEnd={(event) => event.stopPropagation()}>
-        <CartQuantityStepper compact qty={qty} disabled={disabled} onChange={onChange} />
-      </View>
+      <CartQuantityStepper compact qty={qty} disabled={disabled} onChange={onChange} />
     );
   }
 
@@ -631,12 +631,20 @@ const styles = StyleSheet.create({
   lastResultItem: {
     borderBottomWidth: 0,
   },
-  resultToggle: {
+  resultRow: {
     minHeight: 92,
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two,
-    paddingHorizontal: Spacing.three,
+    paddingRight: Spacing.three,
+  },
+  resultToggle: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    paddingLeft: Spacing.three,
     paddingVertical: Spacing.two,
   },
   productImage: {
