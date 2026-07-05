@@ -1,10 +1,22 @@
-import { SymbolView } from 'expo-symbols';
+import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { Pressable, StyleSheet, View, type GestureResponderEvent } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { Radii, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { tapLight } from '@/lib/haptics';
+
+const MINUS_ICON = {
+  ios: 'minus',
+  android: 'remove',
+  web: 'remove',
+} satisfies SymbolViewProps['name'];
+
+const PLUS_ICON = {
+  ios: 'plus',
+  android: 'add',
+  web: 'add',
+} satisfies SymbolViewProps['name'];
 
 type CartQuantityStepperProps = {
   qty: number;
@@ -46,7 +58,7 @@ export function CartQuantityStepper({
         hitSlop={8}
         onPress={(event) => handleChange(Math.max(0, qty - 1), event)}
         style={({ pressed }) => [styles.button, pressed && styles.pressed]}>
-        <SymbolView name="minus" tintColor={theme.text} size={14} />
+        <SymbolView name={MINUS_ICON} tintColor={theme.text} size={14} />
       </Pressable>
       <ThemedText type="smallBold" style={styles.qty}>
         {qty}
@@ -58,7 +70,7 @@ export function CartQuantityStepper({
         hitSlop={8}
         onPress={(event) => handleChange(qty + 1, event)}
         style={({ pressed }) => [styles.button, pressed && styles.pressed]}>
-        <SymbolView name="plus" tintColor={theme.text} size={14} />
+        <SymbolView name={PLUS_ICON} tintColor={theme.text} size={14} />
       </Pressable>
     </View>
   );
