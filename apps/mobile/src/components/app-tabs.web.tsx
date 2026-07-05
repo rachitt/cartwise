@@ -21,7 +21,7 @@ export default function AppTabs() {
 
   return (
     <Tabs>
-      <TabSlot style={{ height: '100%' }} />
+      <TabSlot style={styles.tabSlot} />
       <TabList asChild>
         <CustomTabList>
           <TabTrigger name="home" href="/" asChild>
@@ -83,8 +83,14 @@ export function CustomTabList(props: TabListProps) {
 }
 
 const styles = StyleSheet.create({
+  tabSlot: {
+    height: '100%',
+    paddingTop: 88,
+  },
   tabListContainer: {
     position: 'absolute',
+    top: 0,
+    zIndex: 10,
     width: '100%',
     padding: Spacing.three,
     justifyContent: 'center',

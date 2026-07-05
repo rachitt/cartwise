@@ -49,15 +49,13 @@ async function main() {
   }
 
   if (!chosen) {
-    console.warn("Warning: no usable Postgres was found and Docker could not start one; starting Expo with EXPO_PUBLIC_USE_MOCKS=1.");
-    await startMockMobile();
-    return;
+    throw new Error("no usable Postgres was found and Docker could not start one; start Postgres/Docker or run npm run dev:mock explicitly for a mock-only UI.");
   }
 
   console.log(`Using Postgres from ${chosen.label}: ${redactDatabaseUrl(chosen.url)}`);
-  await writeApiEnv(chosen.url);
-  await runSetup(chosen.url);
-  await startFullStack(chosen.url);
+  const apiEnv = await writeApiEnv(chosen.url);
+  await runSetup(apiEnv);
+  await startFullStack(apiEnv);
 }
 
 async function chooseDatabase(candidates) {
@@ -182,13 +180,17 @@ async function writeApiEnv(databaseUrl) {
   }
 
   await mkdir(path.dirname(apiEnvPath), { recursive: true });
-  await writeFile(apiEnvPath, mergeApiEnv(existing, databaseUrl), "utf8");
+  const merged = mergeApiEnv(existing, databaseUrl);
+  await writeFile(apiEnvPath, merged, "utf8");
   console.log(`Wrote apps/api/.env with ${redactDatabaseUrl(databaseUrl)}.`);
+  return {
+    ...process.env,
+    ...parseEnvText(merged),
+    DATABASE_URL: databaseUrl,
+  };
 }
 
-async function runSetup(databaseUrl) {
-  const env = { ...process.env, DATABASE_URL: databaseUrl };
-
+async function runSetup(env) {
   console.log("Running API migrations.");
   await runRequiredCommand("npm", ["run", "db:migrate", "--workspace", "apps/api"], env);
 
@@ -196,22 +198,34 @@ async function runSetup(databaseUrl) {
   await runRequiredCommand("npm", ["run", "db:seed", "--workspace", "apps/api"], env);
 }
 
-async function startFullStack(databaseUrl) {
+async function startFullStack(apiEnv) {
   console.log("Starting API and Expo.");
   const api = spawnPrefixed("api", "npm", ["run", "dev", "--workspace", "apps/api"], {
-    ...process.env,
-    DATABASE_URL: databaseUrl,
+    ...apiEnv,
   });
   const mobile = spawnPrefixed("mobile", "npm", ["run", "start", "--workspace", "apps/mobile"], process.env);
   await supervise([api, mobile]);
 }
 
-async function startMockMobile() {
-  const mobile = spawnPrefixed("mobile", "npm", ["run", "start", "--workspace", "apps/mobile"], {
-    ...process.env,
-    EXPO_PUBLIC_USE_MOCKS: "1",
-  });
-  await supervise([mobile]);
+function parseEnvText(envText) {
+  const env = {};
+
+  for (const rawLine of envText.split(/\r?\n/)) {
+    const match = rawLine.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/);
+    if (!match) {
+      continue;
+    }
+
+    let value = match[2].trim();
+    const quote = value[0];
+    if ((quote === '"' || quote === "'") && value.endsWith(quote)) {
+      value = value.slice(1, -1);
+    }
+
+    env[match[1]] = value;
+  }
+
+  return env;
 }
 
 async function runRequiredCommand(command, args, env) {

@@ -44,7 +44,7 @@ export type PushTokenResponse = { ok: true };
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
 const USE_MOCKS = process.env.EXPO_PUBLIC_USE_MOCKS === '1';
-const REQUEST_TIMEOUT_MS = 4000;
+const REQUEST_TIMEOUT_MS = 25000;
 
 type RequestJsonOptions = {
   method?: 'DELETE' | 'GET' | 'POST' | 'PUT';
@@ -87,13 +87,6 @@ async function requestJson<T>(
       throw new Error(`Cartwise API returned ${response.status}`);
     }
     return (await response.json()) as T;
-  } catch (error) {
-    // Mock fallback is a dev convenience only — production must surface the
-    // error rather than show fabricated prices.
-    if (__DEV__) {
-      return fallback();
-    }
-    throw error;
   } finally {
     clearTimeout(timeout);
   }

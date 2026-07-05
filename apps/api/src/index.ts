@@ -12,6 +12,21 @@ import { priceApiPlugin } from "./routes/price-api.js";
 export async function buildApp() {
   const app = Fastify({ logger: true });
 
+  app.addHook("onRequest", async (request, reply) => {
+    const origin = request.headers.origin;
+
+    if (origin) {
+      reply.header("Access-Control-Allow-Origin", origin);
+      reply.header("Access-Control-Allow-Headers", "Content-Type, x-device-id");
+      reply.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+      reply.header("Vary", "Origin");
+    }
+
+    if (request.method === "OPTIONS") {
+      return reply.code(204).send();
+    }
+  });
+
   await app.register(rateLimit, { max: 120, timeWindow: "1 minute" });
 
   app.get("/health", async () => ({

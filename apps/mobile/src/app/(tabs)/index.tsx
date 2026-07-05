@@ -1,9 +1,9 @@
-import type { StorePrice } from '@cartwise/shared';
+import type { Store, StorePrice } from '@cartwise/shared';
 import { Image } from 'expo-image';
-import { router } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Keyboard,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -18,37 +18,71 @@ import { CartQuantityStepper } from '@/components/cart-quantity-stepper';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
-import { effectivePrice, formatPrice, formatProductSize, storeBadge } from '@/lib/price';
-import { usePreferencesStore } from '@/state/preferences';
 import { useTheme } from '@/hooks/use-theme';
+import {
+  chainLabel,
+  effectivePrice,
+  formatPrice,
+  formatProductSize,
+  formatRelativeTime,
+} from '@/lib/price';
+import { usePreferencesStore } from '@/state/preferences';
+
+const MIN_SEARCH_LENGTH = 2;
 
 export default function SearchScreen() {
   const zip = usePreferencesStore((state) => state.zip);
-  const selectedStoreIds = usePreferencesStore((state) => state.selectedStoreIds);
+  const resetLocation = usePreferencesStore((state) => state.resetLocation);
   const [searchText, setSearchText] = useState('');
-  const [debouncedSearchText, setDebouncedSearchText] = useState('');
+  const [submittedSearchText, setSubmittedSearchText] = useState('');
   const theme = useTheme();
   const storesQuery = useStores(zip);
-  const searchQuery = useSearchProducts(debouncedSearchText, selectedStoreIds);
+  const activeStores = useMemo(() => storesQuery.data?.stores ?? [], [storesQuery.data?.stores]);
+  const activeStoreIds = useMemo(() => activeStores.map((store) => store.id), [activeStores]);
+  const searchQuery = useSearchProducts(submittedSearchText, activeStoreIds);
   const cartQuery = useCurrentCart();
   const updateCartItem = useUpdateCartItem();
 
-  const storeById = useMemo(
-    () => new Map((storesQuery.data?.stores ?? []).map((store) => [store.id, store])),
-    [storesQuery.data?.stores],
-  );
   const cartItemByProductId = useMemo(
     () => new Map((cartQuery.data?.cart.items ?? []).map((item) => [item.productId, item])),
     [cartQuery.data?.cart.items],
   );
 
-  useEffect(() => {
-    const timeout = setTimeout(() => setDebouncedSearchText(searchText), 300);
-    return () => clearTimeout(timeout);
-  }, [searchText]);
-
-  const hasSearch = debouncedSearchText.trim().length >= 2;
+  const canSearch =
+    searchText.trim().length >= MIN_SEARCH_LENGTH &&
+    activeStoreIds.length >= 2 &&
+    !storesQuery.isLoading;
+  const hasSearch = submittedSearchText.length >= MIN_SEARCH_LENGTH;
   const results = searchQuery.data?.results ?? [];
+  const pricedResults = results.filter((result) => result.prices.length > 0);
+  const sortedPricedResults = useMemo(
+    () =>
+      [...pricedResults].sort(
+        (first, second) =>
+          second.prices.length - first.prices.length ||
+          lowestEffectivePrice(first.prices) - lowestEffectivePrice(second.prices),
+      ),
+    [pricedResults],
+  );
+  const storesErrorMessage = getErrorMessage(storesQuery.error);
+  const searchErrorMessage = getErrorMessage(searchQuery.error);
+
+  function submitSearch() {
+    const trimmed = searchText.trim();
+
+    if (trimmed.length < MIN_SEARCH_LENGTH || activeStoreIds.length < 2) {
+      return;
+    }
+
+    setSearchText(trimmed);
+    setSubmittedSearchText(trimmed);
+    Keyboard.dismiss();
+  }
+
+  function clearSearch() {
+    setSearchText('');
+    setSubmittedSearchText('');
+  }
 
   return (
     <ThemedView style={styles.screen}>
@@ -58,59 +92,148 @@ export default function SearchScreen() {
           contentContainerStyle={styles.content}
           style={styles.scrollView}>
           <View style={styles.header}>
-            <ThemedText type="smallBold" themeColor="accent">
-              Cartwise Search
+            <View style={styles.headerTopRow}>
+              <View style={styles.brandMark}>
+                <ThemedText type="smallBold" style={styles.brandMarkText}>
+                  C
+                </ThemedText>
+              </View>
+              <View style={styles.headerCopy}>
+                <ThemedText type="smallBold" themeColor="accent">
+                  Cartwise
+                </ThemedText>
+                <ThemedText style={styles.screenTitle}>Search grocery prices</ThemedText>
+              </View>
+            </View>
+
+            <View style={styles.locationRow}>
+              <ThemedView type="accentMuted" style={styles.zipPill}>
+                <ThemedText type="smallBold" themeColor="accent">
+                  ZIP {zip}
+                </ThemedText>
+              </ThemedView>
+              <Pressable
+                accessibilityRole="button"
+                onPress={resetLocation}
+                style={({ pressed }) => [styles.changeLocationButton, pressed && styles.pressed]}>
+                <ThemedText type="smallBold" themeColor="accent">
+                  Change location
+                </ThemedText>
+              </Pressable>
+            </View>
+          </View>
+
+          <ThemedView type="backgroundElement" style={styles.searchPanel}>
+            <ThemedText type="smallBold">Search item</ThemedText>
+            <View
+              style={[
+                styles.searchInputShell,
+                {
+                  backgroundColor: theme.background,
+                  borderColor: canSearch || searchText.length === 0 ? theme.border : theme.danger,
+                },
+              ]}>
+              <TextInput
+                accessibilityLabel="Search grocery item"
+                autoCapitalize="none"
+                autoCorrect={false}
+                onChangeText={setSearchText}
+                onSubmitEditing={submitSearch}
+                placeholder="Milk, eggs, chicken, cereal"
+                placeholderTextColor={theme.textSecondary}
+                returnKeyType="search"
+                value={searchText}
+                style={[styles.searchInput, { color: theme.text }]}
+              />
+              {searchText.length > 0 ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear item search"
+                  onPress={clearSearch}
+                  style={({ pressed }) => [styles.clearButton, pressed && styles.pressed]}>
+                  <ThemedText type="smallBold" themeColor="textSecondary">
+                    Clear
+                  </ThemedText>
+                </Pressable>
+              ) : null}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Search nearby store prices"
+                disabled={!canSearch}
+                onPress={submitSearch}
+                style={({ pressed }) => [
+                  styles.searchButton,
+                  { backgroundColor: canSearch ? theme.accent : theme.backgroundSelected },
+                  pressed && canSearch && styles.pressed,
+                ]}>
+                <ThemedText type="smallBold" style={styles.searchButtonText}>
+                  Search
+                </ThemedText>
+              </Pressable>
+            </View>
+
+            {storesQuery.isLoading ? (
+              <StatusLine message="Loading nearby stores..." />
+            ) : storesQuery.isError ? (
+              <ThemedText type="small" themeColor="danger">
+                {storesErrorMessage}
+              </ThemedText>
+            ) : activeStores.length < 2 ? (
+              <ThemedText type="small" themeColor="danger">
+                Cartwise needs at least two nearby stores for price comparison.
+              </ThemedText>
+            ) : (
+              <StatusLine message={`Searching ${activeStores.length} nearby stores in ${zip}.`} />
+            )}
+          </ThemedView>
+
+          <View style={styles.resultsHeader}>
+            <ThemedText type="smallBold">
+              {hasSearch ? `Results for "${submittedSearchText}"` : 'Results'}
             </ThemedText>
-            <ThemedText type="subtitle">Compare one grocery item</ThemedText>
-            <ThemedText themeColor="textSecondary">
-              Search staples and see the cheapest selected store at a glance.
+            <ThemedText type="small" themeColor="textSecondary">
+              {searchQuery.isFetching
+                ? 'Checking live prices nearby'
+                : hasSearch
+                  ? `${sortedPricedResults.length} products with prices`
+                  : 'Search an item to see store-by-store prices.'}
             </ThemedText>
           </View>
 
-          <TextInput
-            accessibilityLabel="Search groceries"
-            autoCapitalize="none"
-            autoCorrect={false}
-            placeholder="Search milk, eggs, pasta..."
-            placeholderTextColor={theme.textSecondary}
-            value={searchText}
-            onChangeText={setSearchText}
-            style={[
-              styles.searchInput,
-              {
-                color: theme.text,
-                backgroundColor: theme.backgroundElement,
-                borderColor: theme.border,
-              },
-            ]}
-          />
-
           {searchQuery.isLoading ? (
             <SearchSkeleton />
+          ) : storesQuery.isError ? (
+            <EmptyState title="Nearby stores unavailable" message={storesErrorMessage} />
+          ) : searchQuery.isError ? (
+            <EmptyState title="Search failed" message={searchErrorMessage} />
           ) : !hasSearch ? (
-            <EmptyState message="Search for an item to compare nearby prices." />
-          ) : results.length === 0 ? (
-            <EmptyState message="No prices found nearby" />
+            <EmptyState
+              title="Search an item"
+              message="Enter one grocery item. Cartwise will show nearby stores and their prices."
+            />
+          ) : activeStoreIds.length < 2 ? (
+            <EmptyState
+              title="Need nearby stores"
+              message="Change location and try a ZIP with at least two supported grocery stores."
+            />
+          ) : sortedPricedResults.length === 0 ? (
+            <EmptyState
+              title="No live prices found"
+              message="Try a more common item name like milk, eggs, bread, or chicken."
+            />
           ) : (
             <View style={styles.results}>
-              {results.map((result) => {
-                const cheapest = getCheapestPrice(result.prices);
-                const store = cheapest ? storeById.get(cheapest.storeId) : undefined;
+              {sortedPricedResults.slice(0, 8).map((result) => {
                 const size = formatProductSize(result.product.sizeQty, result.product.sizeUnit);
                 const cartItem = cartItemByProductId.get(result.product.id);
                 const qty = cartItem?.qty ?? 0;
 
                 return (
-                  <Pressable
+                  <ThemedView
                     key={result.product.id}
-                    onPress={() =>
-                      router.push({
-                        pathname: '/products/[id]',
-                        params: { id: result.product.id },
-                      })
-                    }
-                    style={({ pressed }) => pressed && styles.pressed}>
-                    <ThemedView type="backgroundElement" style={styles.resultCard}>
+                    type="backgroundElement"
+                    style={styles.resultCard}>
+                    <View style={styles.productHeader}>
                       <View style={styles.productImage}>
                         {result.product.imageUrl ? (
                           <Image source={result.product.imageUrl} style={styles.image} />
@@ -121,60 +244,40 @@ export default function SearchScreen() {
                         )}
                       </View>
                       <View style={styles.resultCopy}>
-                        <ThemedText type="smallBold">{result.product.name}</ThemedText>
-                        <ThemedText type="small" themeColor="textSecondary">
-                          {[result.product.brand, size].filter(Boolean).join(' · ')}
+                        <ThemedText type="smallBold" numberOfLines={2}>
+                          {result.product.name}
                         </ThemedText>
-                      </View>
-                      <View style={styles.priceBlock}>
-                        {cheapest ? (
-                          <>
-                            <ThemedText type="smallBold" themeColor="accent">
-                              {formatPrice(effectivePrice(cheapest))}
-                            </ThemedText>
-                            <ThemedView type="accentMuted" style={styles.badge}>
-                              <ThemedText type="smallBold" themeColor="accent">
-                                {storeBadge(store)}
-                              </ThemedText>
-                            </ThemedView>
-                          </>
-                        ) : (
-                          <ThemedText type="small" themeColor="textSecondary">
-                            No prices
+                        <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
+                          {result.product.brand || 'Brand unavailable'}
+                        </ThemedText>
+                        {size ? (
+                          <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
+                            {size}
                           </ThemedText>
-                        )}
-                        {qty > 0 ? (
-                          <CartQuantityStepper
-                            compact
-                            qty={qty}
-                            disabled={updateCartItem.isPending}
-                            onChange={(nextQty) =>
-                              updateCartItem.mutate({ productId: result.product.id, qty: nextQty })
-                            }
-                          />
-                        ) : (
-                          <Pressable
-                            accessibilityRole="button"
-                            accessibilityLabel={`Add ${result.product.name} to cart`}
-                            disabled={updateCartItem.isPending}
-                            onPress={(event: GestureResponderEvent) => {
-                              event.stopPropagation();
-                              updateCartItem.mutate({ productId: result.product.id, qty: 1 });
-                            }}
-                            style={({ pressed }) => [
-                              styles.addButton,
-                              { backgroundColor: theme.accent },
-                              pressed && styles.pressed,
-                              updateCartItem.isPending && styles.disabled,
-                            ]}>
-                            <ThemedText type="smallBold" style={styles.addButtonText}>
-                              Add
-                            </ThemedText>
-                          </Pressable>
-                        )}
+                        ) : null}
                       </View>
-                    </ThemedView>
-                  </Pressable>
+                      <AddToCartControl
+                        disabled={updateCartItem.isPending}
+                        productId={result.product.id}
+                        productName={result.product.name}
+                        qty={qty}
+                        onChange={(nextQty) =>
+                          updateCartItem.mutate({ productId: result.product.id, qty: nextQty })
+                        }
+                      />
+                    </View>
+
+                    <View style={styles.priceTable}>
+                      <ThemedText type="smallBold">Store prices</ThemedText>
+                      {getStorePriceRows(activeStores, result.prices).map(({ store, price }) => (
+                        <StorePriceRow
+                          key={`${result.product.id}-${store.id}`}
+                          price={price}
+                          store={store}
+                        />
+                      ))}
+                    </View>
+                  </ThemedView>
                 );
               })}
             </View>
@@ -185,8 +288,99 @@ export default function SearchScreen() {
   );
 }
 
-function getCheapestPrice(prices: StorePrice[]) {
-  return [...prices].sort((first, second) => effectivePrice(first) - effectivePrice(second))[0];
+function StorePriceRow({ store, price }: { store: Store; price: StorePrice }) {
+  return (
+    <View style={styles.priceRow}>
+      <View style={styles.priceStore}>
+        <ThemedText type="smallBold" numberOfLines={1}>
+          {store.name}
+        </ThemedText>
+        <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
+          {chainLabel(store.chain)}
+          {store.distanceMiles !== undefined ? ` · ${store.distanceMiles.toFixed(1)} mi` : ''}
+        </ThemedText>
+      </View>
+      <View style={styles.priceMeta}>
+        <ThemedText type="smallBold">{formatPrice(effectivePrice(price))}</ThemedText>
+        <ThemedText type="small" themeColor="textSecondary">
+          as of {formatRelativeTime(price.capturedAt)}
+        </ThemedText>
+      </View>
+    </View>
+  );
+}
+
+function AddToCartControl({
+  disabled,
+  productId,
+  productName,
+  qty,
+  onChange,
+}: {
+  disabled: boolean;
+  productId: string;
+  productName: string;
+  qty: number;
+  onChange: (qty: number) => void;
+}) {
+  const theme = useTheme();
+
+  if (qty > 0) {
+    return <CartQuantityStepper compact qty={qty} disabled={disabled} onChange={onChange} />;
+  }
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`Add ${productName} to cart`}
+      disabled={disabled}
+      onPress={(event: GestureResponderEvent) => {
+        event.stopPropagation();
+        onChange(1);
+      }}
+      style={({ pressed }) => [
+        styles.addButton,
+        { backgroundColor: theme.accent },
+        pressed && styles.pressed,
+        disabled && styles.disabled,
+      ]}>
+      <ThemedText type="smallBold" style={styles.addButtonText}>
+        Add
+      </ThemedText>
+    </Pressable>
+  );
+}
+
+function getStorePriceRows(stores: Store[], prices: StorePrice[]) {
+  const storeById = new Map(stores.map((store) => [store.id, store]));
+
+  return prices
+    .map((price) => {
+      const store = storeById.get(price.storeId);
+      return store ? { store, price } : null;
+    })
+    .filter((row): row is { store: Store; price: StorePrice } => row !== null)
+    .sort((first, second) => effectivePrice(first.price) - effectivePrice(second.price));
+}
+
+function lowestEffectivePrice(prices: StorePrice[]) {
+  return Math.min(...prices.map(effectivePrice));
+}
+
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message.length > 0) {
+    return error.message;
+  }
+
+  return 'Cartwise could not reach the live price API.';
+}
+
+function StatusLine({ message }: { message: string }) {
+  return (
+    <ThemedText type="small" themeColor="textSecondary">
+      {message}
+    </ThemedText>
+  );
 }
 
 function SearchSkeleton() {
@@ -200,9 +394,12 @@ function SearchSkeleton() {
   );
 }
 
-function EmptyState({ message }: { message: string }) {
+function EmptyState({ title, message }: { title: string; message: string }) {
   return (
     <ThemedView type="backgroundElement" style={styles.emptyState}>
+      <ThemedText type="smallBold" style={styles.emptyText}>
+        {title}
+      </ThemedText>
       <ThemedText themeColor="textSecondary" style={styles.emptyText}>
         {message}
       </ThemedText>
@@ -231,59 +428,130 @@ const styles = StyleSheet.create({
     gap: Spacing.three,
   },
   header: {
+    gap: Spacing.three,
+  },
+  headerTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.three,
+  },
+  brandMark: {
+    width: 44,
+    height: 44,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#16a34a',
+  },
+  brandMarkText: {
+    color: '#ffffff',
+  },
+  screenTitle: {
+    fontSize: 30,
+    lineHeight: 34,
+    fontWeight: '700',
+  },
+  headerCopy: {
+    flex: 1,
+    minWidth: 0,
+    gap: Spacing.one,
+  },
+  locationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: Spacing.two,
   },
-  searchInput: {
-    minHeight: 54,
+  zipPill: {
+    minHeight: 36,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.three,
+  },
+  changeLocationButton: {
+    minHeight: 36,
+    borderRadius: 8,
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.two,
+  },
+  searchPanel: {
+    borderRadius: 8,
+    padding: Spacing.three,
+    gap: Spacing.three,
+  },
+  searchInputShell: {
+    minHeight: 58,
     borderRadius: 8,
     borderWidth: 1,
-    paddingHorizontal: Spacing.three,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one,
+    padding: Spacing.one,
+  },
+  searchInput: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 48,
+    paddingHorizontal: Spacing.two,
     fontSize: 18,
-    fontWeight: '600',
+    fontWeight: '700',
+  },
+  clearButton: {
+    minHeight: 44,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.two,
+  },
+  searchButton: {
+    minHeight: 44,
+    minWidth: 78,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.three,
+  },
+  searchButtonText: {
+    color: '#ffffff',
+  },
+  resultsHeader: {
+    gap: Spacing.one,
   },
   results: {
     gap: Spacing.three,
   },
   resultCard: {
-    minHeight: 92,
     borderRadius: 8,
     padding: Spacing.three,
+    gap: Spacing.three,
+  },
+  productHeader: {
+    minHeight: 74,
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.three,
   },
   productImage: {
-    width: 56,
-    height: 56,
+    width: 68,
+    height: 68,
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#dcfce7',
+    backgroundColor: 'rgba(22, 163, 74, 0.1)',
   },
   image: {
-    width: 56,
-    height: 56,
+    width: 68,
+    height: 68,
     borderRadius: 8,
   },
   resultCopy: {
     flex: 1,
+    minWidth: 0,
     gap: Spacing.one,
-  },
-  priceBlock: {
-    alignItems: 'flex-end',
-    gap: Spacing.one,
-    minWidth: 104,
-  },
-  badge: {
-    borderRadius: 8,
-    paddingHorizontal: Spacing.two,
-    paddingVertical: Spacing.half,
-  },
-  pressed: {
-    opacity: 0.72,
   },
   addButton: {
-    minHeight: 36,
+    minHeight: 40,
+    minWidth: 64,
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
@@ -292,24 +560,48 @@ const styles = StyleSheet.create({
   addButtonText: {
     color: '#ffffff',
   },
-  disabled: {
-    opacity: 0.5,
+  priceTable: {
+    gap: Spacing.two,
+  },
+  priceRow: {
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.two,
+  },
+  priceStore: {
+    flex: 1,
+    minWidth: 0,
+    gap: Spacing.half,
+  },
+  priceMeta: {
+    minWidth: 92,
+    alignItems: 'flex-end',
   },
   skeletonStack: {
     gap: Spacing.three,
   },
   skeletonCard: {
-    height: 92,
+    height: 172,
     borderRadius: 8,
+    opacity: 0.7,
   },
   emptyState: {
-    minHeight: 180,
+    minHeight: 150,
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
     padding: Spacing.four,
+    gap: Spacing.one,
   },
   emptyText: {
     textAlign: 'center',
+  },
+  pressed: {
+    opacity: 0.72,
+  },
+  disabled: {
+    opacity: 0.55,
   },
 });

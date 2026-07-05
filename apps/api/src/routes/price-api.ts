@@ -21,10 +21,10 @@ const storeIdsSchema = z.string().transform((value, context) => {
     .map((storeId) => storeId.trim())
     .filter(Boolean);
 
-  if (storeIds.length === 0 || storeIds.length > 8) {
+  if (storeIds.length === 0 || storeIds.length > 16) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
-      message: "storeIds must include 1-8 UUIDs",
+      message: "storeIds must include 1-16 UUIDs",
     });
     return z.NEVER;
   }
