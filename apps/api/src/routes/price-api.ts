@@ -71,6 +71,11 @@ interface ResponseSource {
   capturedAt?: string;
 }
 
+interface SearchCacheItem {
+  product: Product;
+  price: StorePrice | null;
+}
+
 export const priceApiPlugin: FastifyPluginAsync<PriceApiDeps> = async (app, deps) => {
   const cache = deps.cache ?? createCache(deps.db);
 
@@ -137,23 +142,35 @@ export const priceApiPlugin: FastifyPluginAsync<PriceApiDeps> = async (app, deps
         sources,
         store.chainSlug,
         cache,
-        `search:${store.chainSlug}:${store.externalLocationId}:${normalizedQuery}`,
+        `search:v2:${store.chainSlug}:${store.externalLocationId}:${normalizedQuery}`,
         PRODUCTS_TTL_SECONDS,
-        () => collector.searchProducts(query.q, store.externalLocationId),
+        async () => {
+          const collectedProducts = await collector.searchProducts(query.q, store.externalLocationId);
+          const matchedProducts: SearchCacheItem[] = [];
+
+          for (const collectedProduct of collectedProducts.map(normalizeCollectedProductDates)) {
+            const matched = await upsertCollectedProduct(
+              deps.db,
+              collectedProduct,
+              store.id,
+              store.chainSlug,
+            );
+            matchedProducts.push({
+              product: toProduct(matched.product),
+              price: matched.price,
+            });
+          }
+
+          return matchedProducts;
+        },
       );
       if (!result) {
         continue;
       }
 
-      for (const collectedProduct of result.value.map(normalizeCollectedProductDates)) {
-        const matched = await upsertCollectedProduct(
-          deps.db,
-          collectedProduct,
-          store.id,
-          store.chainSlug,
-        );
+      for (const matched of result.value) {
         const existing = groupedResults.get(matched.product.id) ?? {
-          product: toProduct(matched.product),
+          product: matched.product,
           prices: [],
         };
 
@@ -206,7 +223,30 @@ export const priceApiPlugin: FastifyPluginAsync<PriceApiDeps> = async (app, deps
         cache,
         `price:${mapping.store.chainSlug}:${mapping.store.externalLocationId}:${mapping.externalProductId}`,
         PRODUCTS_TTL_SECONDS,
-        () => collector.getPrices([mapping.externalProductId], mapping.store.externalLocationId),
+        async () => {
+          const collectedProducts = (
+            await collector.getPrices([mapping.externalProductId], mapping.store.externalLocationId)
+          ).map(normalizeCollectedProductDates);
+
+          for (const collectedProduct of collectedProducts) {
+            if (
+              collectedProduct.externalProductId !== mapping.externalProductId ||
+              collectedProduct.price === null
+            ) {
+              continue;
+            }
+
+            await deps.db.insertPriceSnapshot({
+              storeProductId: mapping.id,
+              price: collectedProduct.price,
+              promoPrice: collectedProduct.promoPrice,
+              capturedAt: collectedProduct.capturedAt,
+              source: mapping.store.chainSlug,
+            });
+          }
+
+          return collectedProducts;
+        },
       );
       if (!result) {
         continue;
@@ -221,13 +261,6 @@ export const priceApiPlugin: FastifyPluginAsync<PriceApiDeps> = async (app, deps
         }
 
         const capturedAt = collectedProduct.capturedAt;
-        await deps.db.insertPriceSnapshot({
-          storeProductId: mapping.id,
-          price: collectedProduct.price,
-          promoPrice: collectedProduct.promoPrice,
-          capturedAt,
-          source: mapping.store.chainSlug,
-        });
         prices.push({
           storeId: mapping.storeId,
           productId: product.id,

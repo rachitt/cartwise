@@ -109,31 +109,35 @@ async function refreshLatestPrices(
       const externalProductIds = Array.from(
         new Set(group.rows.map(({ row }) => row.externalProductId)),
       ).sort();
-      const collectedProducts = await cache.withCache(
+      await cache.withCache(
         `price:${group.chain}:${group.externalLocationId}:${externalProductIds.join(",")}`,
         PRICES_TTL_SECONDS,
-        () => collector.getPrices(externalProductIds, group.externalLocationId),
-      );
-      const collectedById = new Map(
-        collectedProducts
-          .map(normalizeCollectedProductDates)
-          .map((product) => [product.externalProductId, product]),
-      );
+        async () => {
+          const collectedProducts = (
+            await collector.getPrices(externalProductIds, group.externalLocationId)
+          ).map(normalizeCollectedProductDates);
+          const collectedById = new Map(
+            collectedProducts.map((product) => [product.externalProductId, product]),
+          );
 
-      for (const { row } of group.rows) {
-        const collected = collectedById.get(row.externalProductId);
-        if (!collected || collected.price === null) {
-          continue;
-        }
+          for (const { row } of group.rows) {
+            const collected = collectedById.get(row.externalProductId);
+            if (!collected || collected.price === null) {
+              continue;
+            }
 
-        await db.insertPriceSnapshot({
-          storeProductId: row.storeProductId,
-          price: collected.price,
-          promoPrice: collected.promoPrice,
-          capturedAt: collected.capturedAt,
-          source: row.store.chainSlug,
-        });
-      }
+            await db.insertPriceSnapshot({
+              storeProductId: row.storeProductId,
+              price: collected.price,
+              promoPrice: collected.promoPrice,
+              capturedAt: collected.capturedAt,
+              source: row.store.chainSlug,
+            });
+          }
+
+          return collectedProducts;
+        },
+      );
     } catch (error) {
       for (const watchId of new Set(group.rows.map((row) => row.watchId))) {
         recordWatchError(errors, logger, watchId, error);
@@ -178,7 +182,7 @@ function groupRowsByCollectorCall(rowsToRefresh: RefreshRow[]): Map<
 function cheapestPriceRow(rows: LatestProductStorePriceRow[]): LatestProductStorePriceRow | null {
   return (
     rows
-      .filter((row) => row.price)
+      .filter((row) => row.price !== null && row.price.price !== null)
       .sort((left, right) => effectivePrice(left.price!) - effectivePrice(right.price!))[0] ?? null
   );
 }
@@ -190,8 +194,8 @@ export function isPriceDrop(baselinePrice: number, newPrice: number): boolean {
   return newCents <= baselineCents - thresholdCents;
 }
 
-function effectivePrice(price: { price: number; promoPrice: number | null }): number {
-  return price.promoPrice ?? price.price;
+function effectivePrice(price: { price: number | null; promoPrice: number | null }): number {
+  return price.promoPrice ?? price.price ?? Number.POSITIVE_INFINITY;
 }
 
 function moneyToCents(value: number): number {
