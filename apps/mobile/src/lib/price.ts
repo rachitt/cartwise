@@ -16,8 +16,15 @@ export function formatProductSize(sizeQty: number | null, sizeUnit: string | nul
   return `${sizeQty} ${sizeUnit}`;
 }
 
-export function formatRelativeTime(isoDate: string) {
-  const elapsedMs = Date.now() - new Date(isoDate).getTime();
+const FRESHNESS_UNKNOWN_LABEL = 'freshness unknown';
+
+export function formatRelativeTime(isoDate?: string | null) {
+  const timestamp = typeof isoDate === 'string' ? Date.parse(isoDate) : NaN;
+  if (!Number.isFinite(timestamp)) {
+    return null;
+  }
+
+  const elapsedMs = Math.max(0, Date.now() - timestamp);
   const elapsedMinutes = Math.max(1, Math.round(elapsedMs / 60000));
 
   if (elapsedMinutes < 60) {
@@ -31,6 +38,11 @@ export function formatRelativeTime(isoDate: string) {
 
   const elapsedDays = Math.round(elapsedHours / 24);
   return `${elapsedDays} day${elapsedDays === 1 ? '' : 's'} ago`;
+}
+
+export function formatFreshnessStamp(isoDate?: string | null) {
+  const relativeTime = formatRelativeTime(isoDate);
+  return relativeTime ? `as of ${relativeTime}` : FRESHNESS_UNKNOWN_LABEL;
 }
 
 export function chainLabel(chain: Store['chain']) {

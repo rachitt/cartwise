@@ -5,6 +5,7 @@ node_modules/
 dist/
 build/
 .expo/
+docker-compose.override.yml
 *.tsbuildinfo
 .DS_Store
 coverage/

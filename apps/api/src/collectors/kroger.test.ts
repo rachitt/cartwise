@@ -63,6 +63,35 @@ describe("KrogerCollector", () => {
     expect(productCalls[1]?.[1]?.headers).toMatchObject({ Authorization: "Bearer fresh-token" });
   });
 
+  it("shares one token request across concurrent cold calls", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (url) => {
+      if (String(url).endsWith("/v1/connect/oauth2/token")) {
+        return tokenResponse("shared-token");
+      }
+
+      return jsonResponse({ data: [] });
+    });
+    const collector = new KrogerCollector({
+      clientId: "id",
+      clientSecret: "secret",
+      fetch: fetchMock,
+    });
+
+    await Promise.all([
+      collector.searchProducts("milk", "loc-1"),
+      collector.searchProducts("eggs", "loc-1"),
+      collector.searchProducts("bread", "loc-1"),
+    ]);
+
+    const tokenCalls = fetchMock.mock.calls.filter(([url]) =>
+      String(url).endsWith("/v1/connect/oauth2/token"),
+    );
+    const productCalls = fetchMock.mock.calls.filter(([url]) => String(url).includes("/v1/products"));
+
+    expect(tokenCalls).toHaveLength(1);
+    expect(productCalls).toHaveLength(3);
+  });
+
   it("maps nearby stores", async () => {
     const fetchMock = queuedFetch([
       tokenResponse("token"),
@@ -293,6 +322,47 @@ describe("KrogerCollector", () => {
     vi.useRealTimers();
   });
 
+  it("maps zero and negative regular prices to null", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-04T12:00:00Z"));
+    const fetchMock = queuedFetch([
+      tokenResponse("token"),
+      jsonResponse({
+        data: [
+          {
+            productId: "zero-price",
+            description: "Zero Price Item",
+            items: [{ size: "1 ct", price: { regular: 0, promo: 1.99 } }],
+          },
+          {
+            productId: "negative-price",
+            description: "Negative Price Item",
+            items: [{ size: "1 ct", price: { regular: -1, promo: -0.5 } }],
+          },
+        ],
+      }),
+    ]);
+    const collector = new KrogerCollector({
+      clientId: "id",
+      clientSecret: "secret",
+      fetch: fetchMock,
+    });
+
+    await expect(collector.searchProducts("milk", "01400422")).resolves.toMatchObject([
+      {
+        externalProductId: "zero-price",
+        price: null,
+        promoPrice: null,
+      },
+      {
+        externalProductId: "negative-price",
+        price: null,
+        promoPrice: null,
+      },
+    ]);
+    vi.useRealTimers();
+  });
+
   it("retries one 429 response using Retry-After", async () => {
     const fetchMock = queuedFetch([
       tokenResponse("token"),
@@ -309,6 +379,25 @@ describe("KrogerCollector", () => {
 
     const productCalls = fetchMock.mock.calls.filter(([url]) => String(url).includes("/v1/products"));
     expect(productCalls).toHaveLength(2);
+  });
+
+  it("fails fast when Retry-After exceeds the collector clamp", async () => {
+    const fetchMock = queuedFetch([
+      tokenResponse("token"),
+      new Response(null, { status: 429, headers: { "Retry-After": "86400" } }),
+    ]);
+    const collector = new KrogerCollector({
+      clientId: "id",
+      clientSecret: "secret",
+      fetch: fetchMock,
+    });
+
+    await expect(collector.searchProducts("milk", "loc-1")).rejects.toMatchObject({
+      kind: "rate-limit",
+    });
+
+    const productCalls = fetchMock.mock.calls.filter(([url]) => String(url).includes("/v1/products"));
+    expect(productCalls).toHaveLength(1);
   });
 });
 
