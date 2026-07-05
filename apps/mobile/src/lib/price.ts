@@ -45,6 +45,25 @@ export function formatFreshnessStamp(isoDate?: string | null) {
   return relativeTime ? `as of ${relativeTime}` : FRESHNESS_UNKNOWN_LABEL;
 }
 
+export type FreshnessTone = 'fresh' | 'aging' | 'stale';
+
+const FRESH_HOURS = 6;
+const AGING_HOURS = 48;
+
+/** Classify price age for the FreshnessStamp status dot. Unknown dates read as stale. */
+export function freshnessTone(isoDate?: string | null): FreshnessTone {
+  const timestamp = typeof isoDate === 'string' ? Date.parse(isoDate) : NaN;
+  if (!Number.isFinite(timestamp)) {
+    return 'stale';
+  }
+
+  const ageHours = (Date.now() - timestamp) / 3_600_000;
+  if (ageHours <= FRESH_HOURS) {
+    return 'fresh';
+  }
+  return ageHours <= AGING_HOURS ? 'aging' : 'stale';
+}
+
 export function chainLabel(chain: Store['chain']) {
   switch (chain) {
     case 'kroger':

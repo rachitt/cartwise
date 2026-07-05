@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "dependencies": {
     "@cartwise/shared": "*",
+    "@expo-google-fonts/bricolage-grotesque": "^0.4.1",
     "@expo/ui": "~57.0.3",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@tanstack/react-query": "^5.90.0",
@@ -12,6 +13,7 @@
     "expo-device": "~57.0.0",
     "expo-font": "~57.0.0",
     "expo-glass-effect": "~57.0.0",
+    "expo-haptics": "~57.0.0",
     "expo-image": "~57.0.0",
     "expo-linking": "~57.0.1",
     "expo-location": "~57.0.2",

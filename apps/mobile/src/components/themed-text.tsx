@@ -1,36 +1,69 @@
 import { Platform, StyleSheet, Text, type TextProps } from 'react-native';
 
-import { Fonts, ThemeColor } from '@/constants/theme';
+import { FontFamilies, Fonts, ThemeColor } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
+export type ThemedTextType =
+  | 'display'
+  | 'title'
+  | 'heading'
+  | 'default'
+  | 'bodyBold'
+  | 'small'
+  | 'smallBold'
+  | 'caption'
+  | 'eyebrow'
+  | 'stamp'
+  // Legacy variants kept while screens migrate — do not use in new code.
+  | 'subtitle'
+  | 'link'
+  | 'linkPrimary'
+  | 'code';
+
 export type ThemedTextProps = TextProps & {
-  type?: 'default' | 'title' | 'small' | 'smallBold' | 'subtitle' | 'link' | 'linkPrimary' | 'code';
+  type?: ThemedTextType;
   themeColor?: ThemeColor;
 };
 
 export function ThemedText({ style, type = 'default', themeColor, ...rest }: ThemedTextProps) {
   const theme = useTheme();
+  const defaultColor = type === 'eyebrow' || type === 'stamp' ? 'textSecondary' : 'text';
 
   return (
     <Text
-      style={[
-        { color: theme[themeColor ?? 'text'] },
-        type === 'default' && styles.default,
-        type === 'title' && styles.title,
-        type === 'small' && styles.small,
-        type === 'smallBold' && styles.smallBold,
-        type === 'subtitle' && styles.subtitle,
-        type === 'link' && styles.link,
-        type === 'linkPrimary' && styles.linkPrimary,
-        type === 'code' && styles.code,
-        style,
-      ]}
+      style={[{ color: theme[themeColor ?? defaultColor] }, styles[type], style]}
       {...rest}
     />
   );
 }
 
 const styles = StyleSheet.create({
+  display: {
+    fontFamily: FontFamilies.displayBold,
+    fontSize: 32,
+    lineHeight: 36,
+    letterSpacing: -0.5,
+  },
+  title: {
+    fontFamily: FontFamilies.displaySemiBold,
+    fontSize: 22,
+    lineHeight: 28,
+  },
+  heading: {
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: 600,
+  },
+  default: {
+    fontSize: 16,
+    lineHeight: 24,
+    fontWeight: 400,
+  },
+  bodyBold: {
+    fontSize: 16,
+    lineHeight: 24,
+    fontWeight: 700,
+  },
   small: {
     fontSize: 14,
     lineHeight: 20,
@@ -41,20 +74,28 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     fontWeight: 700,
   },
-  default: {
-    fontSize: 16,
-    lineHeight: 24,
+  caption: {
+    fontSize: 12,
+    lineHeight: 16,
     fontWeight: 500,
   },
-  title: {
-    fontSize: 48,
-    fontWeight: 600,
-    lineHeight: 52,
+  eyebrow: {
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: 700,
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+  },
+  stamp: {
+    fontFamily: Fonts.mono,
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: 500,
   },
   subtitle: {
-    fontSize: 32,
-    lineHeight: 44,
-    fontWeight: 600,
+    fontFamily: FontFamilies.displaySemiBold,
+    fontSize: 26,
+    lineHeight: 32,
   },
   link: {
     lineHeight: 30,
