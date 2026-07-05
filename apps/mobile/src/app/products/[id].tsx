@@ -1,23 +1,35 @@
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
+import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { useMemo } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useCurrentCart, useProductPrices, useStores, useUpdateCartItem } from '@/api/queries';
 import { CartQuantityStepper } from '@/components/cart-quantity-stepper';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { MaxContentWidth, Spacing } from '@/constants/theme';
+import { AppButton } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { EmptyState } from '@/components/ui/empty-state';
+import { ReceiptRow } from '@/components/ui/receipt-row';
+import { Skeleton } from '@/components/ui/skeleton';
+import { MaxContentWidth, Radii, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import {
-  chainLabel,
-  effectivePrice,
-  formatFreshnessStamp,
-  formatPrice,
-  formatProductSize,
-} from '@/lib/price';
+import { chainLabel, effectivePrice, formatPrice, formatProductSize } from '@/lib/price';
 import { usePreferencesStore } from '@/state/preferences';
+
+const backIcon: SymbolViewProps['name'] = {
+  ios: 'chevron.left',
+  android: 'arrow_back',
+  web: 'arrow_back',
+};
+
+const searchIcon: SymbolViewProps['name'] = {
+  ios: 'magnifyingglass',
+  android: 'search',
+  web: 'search',
+};
 
 export default function ProductDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -29,7 +41,6 @@ export default function ProductDetailScreen() {
   const productQuery = useProductPrices(productId ?? '', activeStoreIds);
   const cartQuery = useCurrentCart();
   const updateCartItem = useUpdateCartItem();
-  const theme = useTheme();
 
   const storeById = useMemo(
     () => new Map(activeStores.map((store) => [store.id, store])),
@@ -50,36 +61,31 @@ export default function ProductDetailScreen() {
 
   const product = productQuery.data?.product;
   const size = product ? formatProductSize(product.sizeQty, product.sizeUnit) : null;
+  const cheapestPrice = prices[0] ? effectivePrice(prices[0]) : null;
 
   return (
     <ThemedView style={styles.screen}>
       <SafeAreaView style={styles.safeArea}>
         <ScrollView contentContainerStyle={styles.content} style={styles.scrollView}>
-          <Pressable onPress={() => router.back()} hitSlop={12} style={styles.backButton}>
-            <ThemedText type="linkPrimary">Back</ThemedText>
-          </Pressable>
+          <BackControl />
 
           {productQuery.isLoading ? (
-            <DetailSkeleton />
-          ) : !product || prices.length === 0 ? (
-            <ThemedView type="backgroundElement" style={styles.emptyState}>
-              <ThemedText themeColor="textSecondary">No prices found nearby</ThemedText>
-            </ThemedView>
+            <ProductDetailLoadingState />
+          ) : !product || prices.length === 0 || cheapestPrice === null ? (
+            <EmptyState
+              icon={searchIcon}
+              title="No prices found nearby"
+              message="Try another item or change your location."
+            />
           ) : (
             <>
-              <View style={styles.productHeader}>
-                <View style={styles.productImage}>
-                  {product.imageUrl ? (
-                    <Image source={product.imageUrl} style={styles.image} />
-                  ) : (
-                    <ThemedText type="subtitle" themeColor="accent">
-                      {product.name.slice(0, 1)}
-                    </ThemedText>
-                  )}
-                </View>
+              <Card style={styles.productCard}>
+                <ProductThumb imageUrl={product.imageUrl} name={product.name} />
                 <View style={styles.productCopy}>
-                  <ThemedText type="subtitle">{product.name}</ThemedText>
-                  <ThemedText themeColor="textSecondary">
+                  <ThemedText type="title" numberOfLines={3}>
+                    {product.name}
+                  </ThemedText>
+                  <ThemedText type="caption" themeColor="textSecondary" numberOfLines={2}>
                     {[product.brand, size, product.category].filter(Boolean).join(' · ')}
                   </ThemedText>
                   {cartItem ? (
@@ -89,56 +95,43 @@ export default function ProductDetailScreen() {
                       onChange={(qty) => updateCartItem.mutate({ productId: product.id, qty })}
                     />
                   ) : (
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={`Add ${product.name} to cart`}
+                    <AppButton
+                      label="Add to cart"
                       disabled={updateCartItem.isPending}
+                      loading={updateCartItem.isPending}
                       onPress={() => updateCartItem.mutate({ productId: product.id, qty: 1 })}
-                      style={({ pressed }) => [
-                        styles.addButton,
-                        { backgroundColor: theme.accent },
-                        pressed && styles.pressed,
-                        updateCartItem.isPending && styles.disabled,
-                      ]}>
-                      <ThemedText type="smallBold" style={styles.addButtonText}>
-                        Add to cart
-                      </ThemedText>
-                    </Pressable>
+                      style={styles.addButton}
+                    />
                   )}
                 </View>
-              </View>
+              </Card>
 
-              <View style={styles.priceList}>
-                {prices.map((price) => {
-                  const store = storeById.get(price.storeId);
-                  const hasPromo = price.promoPrice !== null;
+              <View style={styles.section}>
+                <ThemedText type="eyebrow">STORE PRICES</ThemedText>
+                <Card flush>
+                  {prices.map((price, index) => {
+                    const store = storeById.get(price.storeId);
+                    const currentPrice = effectivePrice(price);
+                    const delta = currentPrice - cheapestPrice;
 
-                  return (
-                    <ThemedView key={price.storeId} type="backgroundElement" style={styles.priceRow}>
-                      <View style={styles.storeCopy}>
-                        <ThemedText type="smallBold">{store?.name ?? 'Selected store'}</ThemedText>
-                        <ThemedText type="small" themeColor="textSecondary">
-                          {store
-                            ? `${chainLabel(store.chain)} · ${store.distanceMiles?.toFixed(1) ?? '--'} mi`
-                            : price.source}
-                        </ThemedText>
-                        <ThemedText type="small" themeColor="textSecondary">
-                          {formatFreshnessStamp(price.capturedAt)}
-                        </ThemedText>
-                      </View>
-                      <View style={styles.priceCopy}>
-                        {hasPromo ? (
-                          <ThemedText type="small" themeColor="textSecondary" style={styles.struckPrice}>
-                            {formatPrice(price.price)}
-                          </ThemedText>
-                        ) : null}
-                        <ThemedText type="smallBold" themeColor={hasPromo ? 'accent' : 'text'}>
-                          {formatPrice(effectivePrice(price))}
-                        </ThemedText>
-                      </View>
-                    </ThemedView>
-                  );
-                })}
+                    return (
+                      <ReceiptRow
+                        key={price.storeId}
+                        title={store?.name ?? 'Selected store'}
+                        meta={
+                          store
+                            ? `${chainLabel(store.chain)} · ${formatDistance(store.distanceMiles)} mi`
+                            : chainLabel(price.source)
+                        }
+                        value={currentPrice}
+                        wasValue={price.promoPrice !== null ? price.price : null}
+                        capturedAt={price.capturedAt}
+                        highlight={index === 0}
+                        deltaLabel={delta > 0 ? `+${formatPrice(delta)}` : null}
+                      />
+                    );
+                  })}
+                </Card>
               </View>
             </>
           )}
@@ -148,16 +141,70 @@ export default function ProductDetailScreen() {
   );
 }
 
-function DetailSkeleton() {
+function BackControl() {
+  const theme = useTheme();
+
   return (
-    <View style={styles.skeletonStack}>
-      <ActivityIndicator color="#16a34a" />
-      <ThemedView type="backgroundElement" style={styles.skeletonHero} />
-      {[0, 1, 2].map((item) => (
-        <ThemedView key={item} type="backgroundElement" style={styles.skeletonRow} />
-      ))}
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Back"
+      hitSlop={8}
+      onPress={() => router.back()}
+      style={({ pressed }) => [
+        styles.backControl,
+        pressed && { backgroundColor: theme.backgroundSelected },
+      ]}>
+      <SymbolView name={backIcon} tintColor={theme.accent} size={18} />
+      <ThemedText type="smallBold" themeColor="accent">
+        Back
+      </ThemedText>
+    </Pressable>
+  );
+}
+
+function ProductThumb({ imageUrl, name }: { imageUrl: string | null; name: string }) {
+  const theme = useTheme();
+
+  return (
+    <View style={[styles.productThumb, { backgroundColor: theme.accentMuted }]}>
+      {imageUrl ? (
+        <Image
+          source={imageUrl}
+          contentFit="contain"
+          accessibilityLabel={name}
+          style={styles.productImage}
+        />
+      ) : (
+        <ThemedText type="title" themeColor="accent">
+          {name.slice(0, 1)}
+        </ThemedText>
+      )}
     </View>
   );
+}
+
+function ProductDetailLoadingState() {
+  return (
+    <View style={styles.loadingStack}>
+      <Skeleton height={112} radius={Radii.card} />
+      <View style={styles.section}>
+        <ThemedText type="eyebrow">STORE PRICES</ThemedText>
+        <Card flush>
+          {[0, 1, 2].map((item) => (
+            <View key={item} style={styles.skeletonReceiptRow}>
+              <Skeleton height={18} width="52%" />
+              <Skeleton height={14} width="36%" />
+              <Skeleton height={30} width="44%" />
+            </View>
+          ))}
+        </Card>
+      </View>
+    </View>
+  );
+}
+
+function formatDistance(distanceMiles: number | undefined) {
+  return distanceMiles?.toFixed(1) ?? '--';
 }
 
 const styles = StyleSheet.create({
@@ -176,89 +223,54 @@ const styles = StyleSheet.create({
     maxWidth: MaxContentWidth,
     alignSelf: 'center',
     paddingHorizontal: Spacing.four,
-    paddingVertical: Spacing.four,
+    paddingTop: Spacing.four,
+    paddingBottom: Spacing.five,
     gap: Spacing.three,
   },
-  backButton: {
+  backControl: {
+    minHeight: 44,
     alignSelf: 'flex-start',
-  },
-  productHeader: {
     flexDirection: 'row',
-    gap: Spacing.three,
     alignItems: 'center',
+    gap: Spacing.one,
+    borderRadius: Radii.control,
+    paddingHorizontal: Spacing.two,
   },
-  productImage: {
-    width: 92,
-    height: 92,
-    borderRadius: 8,
+  productCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.three,
+  },
+  productThumb: {
+    width: 72,
+    height: 72,
+    borderRadius: Radii.thumb,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#dcfce7',
+    overflow: 'hidden',
   },
-  image: {
-    width: 92,
-    height: 92,
-    borderRadius: 8,
+  productImage: {
+    width: 72,
+    height: 72,
+    borderRadius: Radii.thumb,
   },
   productCopy: {
     flex: 1,
-    gap: Spacing.one,
+    minWidth: 0,
+    gap: Spacing.two,
   },
   addButton: {
-    minHeight: 44,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
     alignSelf: 'flex-start',
-    paddingHorizontal: Spacing.three,
-    marginTop: Spacing.one,
+    minWidth: 132,
   },
-  addButtonText: {
-    color: '#ffffff',
+  section: {
+    gap: Spacing.two,
   },
-  priceList: {
+  loadingStack: {
     gap: Spacing.three,
   },
-  priceRow: {
-    borderRadius: 8,
+  skeletonReceiptRow: {
     padding: Spacing.three,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.three,
-  },
-  storeCopy: {
-    flex: 1,
-    gap: Spacing.one,
-  },
-  priceCopy: {
-    alignItems: 'flex-end',
-    minWidth: 74,
-  },
-  struckPrice: {
-    textDecorationLine: 'line-through',
-  },
-  emptyState: {
-    minHeight: 180,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: Spacing.four,
-  },
-  skeletonStack: {
-    gap: Spacing.three,
-  },
-  skeletonHero: {
-    height: 124,
-    borderRadius: 8,
-  },
-  skeletonRow: {
-    height: 94,
-    borderRadius: 8,
-  },
-  pressed: {
-    opacity: 0.72,
-  },
-  disabled: {
-    opacity: 0.5,
+    gap: Spacing.two,
   },
 });
