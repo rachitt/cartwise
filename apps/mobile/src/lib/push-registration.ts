@@ -3,7 +3,7 @@ import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
-import { isUsingMocks, registerPushToken } from '@/api/client';
+import { registerPushToken } from '@/api/client';
 
 export type PushPermissionStatus = 'denied' | 'granted' | 'undetermined' | 'unsupported';
 
@@ -11,7 +11,6 @@ export type PushRegistrationResult =
   | { status: 'registered'; expoPushToken: string }
   | { status: 'denied' | 'error' | 'unsupported'; message: string };
 
-const MOCK_EXPO_PUSH_TOKEN = 'ExponentPushToken[mock-cartwise-price-alerts]';
 const PLACEHOLDER_PROJECT_ID = '00000000-0000-0000-0000-000000000000';
 const EAS_PROJECT_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -32,10 +31,6 @@ function isConfiguredProjectId(projectId: string | undefined) {
 }
 
 export async function getPushPermissionStatus(): Promise<PushPermissionStatus> {
-  if (isUsingMocks()) {
-    return 'granted';
-  }
-
   if (Platform.OS === 'web') {
     return 'unsupported';
   }
@@ -47,11 +42,6 @@ export async function getPushPermissionStatus(): Promise<PushPermissionStatus> {
 }
 
 export async function registerForPriceAlerts(): Promise<PushRegistrationResult> {
-  if (isUsingMocks()) {
-    await registerPushToken(MOCK_EXPO_PUSH_TOKEN);
-    return { status: 'registered', expoPushToken: MOCK_EXPO_PUSH_TOKEN };
-  }
-
   if (Platform.OS === 'web') {
     return {
       status: 'unsupported',
