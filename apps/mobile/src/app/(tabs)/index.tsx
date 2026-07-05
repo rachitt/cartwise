@@ -390,7 +390,6 @@ function SearchResultRow({
                   themeColor="textSecondary"
                   numberOfLines={1}
                   style={styles.priceStoreText}>
-                  {' '}
                   at {cheapest.store.name}
                 </ThemedText>
               </View>
@@ -723,6 +722,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     minWidth: 0,
+    gap: Spacing.one,
   },
   priceStoreText: {
     flexShrink: 1,
