@@ -1,4 +1,5 @@
 import { router } from 'expo-router';
+import type { SymbolViewProps } from 'expo-symbols';
 import { useMemo } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -23,6 +24,18 @@ import { BottomTabInset, MaxContentWidth, Radii, Spacing } from '@/constants/the
 import { useTheme } from '@/hooks/use-theme';
 import { formatProductSize } from '@/lib/price';
 import { usePreferencesStore } from '@/state/preferences';
+
+const WARNING_ICON = {
+  ios: 'exclamationmark.triangle',
+  android: 'warning',
+  web: 'warning',
+} satisfies SymbolViewProps['name'];
+
+const CART_ICON = {
+  ios: 'cart',
+  android: 'shopping_cart',
+  web: 'shopping_cart',
+} satisfies SymbolViewProps['name'];
 
 export default function CartScreen() {
   const zip = usePreferencesStore((state) => state.zip);
@@ -93,13 +106,13 @@ export default function CartScreen() {
             <CartSkeleton />
           ) : cartQuery.isError ? (
             <EmptyState
-              icon="exclamationmark.triangle"
+              icon={WARNING_ICON}
               title="Could not load cart"
               message="Pull prices again or try reopening Cartwise."
             />
           ) : isEmpty ? (
             <EmptyState
-              icon="cart"
+              icon={CART_ICON}
               title="Your cart is empty"
               message="Add items from Search to compare store totals."
             />

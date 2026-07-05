@@ -1,6 +1,6 @@
 import type { CartOptimization, Store } from '@cartwise/shared';
 import { useQueryClient } from '@tanstack/react-query';
-import { SymbolView } from 'expo-symbols';
+import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { router } from 'expo-router';
 import { useEffect, useMemo, type ReactNode } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
@@ -29,6 +29,18 @@ import { useTheme } from '@/hooks/use-theme';
 import { tapLight } from '@/lib/haptics';
 import { chainLabel, formatPrice, formatProductSize } from '@/lib/price';
 import { usePreferencesStore } from '@/state/preferences';
+
+const RESULTS_EMPTY_ICON = {
+  ios: 'cart.badge.questionmark',
+  android: 'shopping_cart',
+  web: 'shopping_cart',
+} satisfies SymbolViewProps['name'];
+
+const WARNING_ICON = {
+  ios: 'exclamationmark.triangle',
+  android: 'warning',
+  web: 'warning',
+} satisfies SymbolViewProps['name'];
 
 const reasonLabel: Record<CartOptimization['swapSuggestions'][number]['reason'], string> = {
   'cheaper-brand': 'Cheaper brand',
@@ -67,7 +79,7 @@ export default function CartResultsScreen() {
       <ScreenShell>
         <TopBar />
         <EmptyState
-          icon="cart.badge.questionmark"
+          icon={RESULTS_EMPTY_ICON}
           title="No cart results yet"
           message="Finalize your cart to compare totals across nearby stores."
           action={{ label: 'Back to cart', onPress: () => router.replace('/cart') }}
@@ -81,7 +93,7 @@ export default function CartResultsScreen() {
       <ScreenShell>
         <TopBar />
         <EmptyState
-          icon="exclamationmark.triangle"
+          icon={WARNING_ICON}
           title="Could not load results"
           message="The cart finished, but store or item details are unavailable."
           action={{ label: 'Back to cart', onPress: () => router.replace('/cart') }}
