@@ -1,19 +1,18 @@
+import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { useEffect, useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  Pressable,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  View,
-} from 'react-native';
+import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAlerts, useMarkAlertRead, useRemoveWatch } from '@/api/queries';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { AppButton } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Chip } from '@/components/ui/chip';
+import { EmptyState } from '@/components/ui/empty-state';
+import { PriceText } from '@/components/ui/price-text';
+import { Skeleton } from '@/components/ui/skeleton';
+import { BottomTabInset, MaxContentWidth, Radii, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { formatPrice, formatRelativeTime } from '@/lib/price';
 import {
@@ -22,7 +21,17 @@ import {
   type PushPermissionStatus,
 } from '@/lib/push-registration';
 
-const SAVINGS_GREEN = '#16a34a';
+const bellIcon: SymbolViewProps['name'] = {
+  ios: 'bell',
+  android: 'notifications',
+  web: 'notifications',
+};
+
+const warningIcon: SymbolViewProps['name'] = {
+  ios: 'exclamationmark.triangle',
+  android: 'warning',
+  web: 'warning',
+};
 
 export default function AlertsScreen() {
   const theme = useTheme();
@@ -57,8 +66,7 @@ export default function AlertsScreen() {
   const alerts = useMemo(
     () =>
       [...(alertsQuery.data?.alerts ?? [])].sort(
-        (first, second) =>
-          new Date(second.capturedAt).getTime() - new Date(first.capturedAt).getTime(),
+        (first, second) => Date.parse(second.capturedAt) - Date.parse(first.capturedAt),
       ),
     [alertsQuery.data?.alerts],
   );
@@ -69,18 +77,23 @@ export default function AlertsScreen() {
     setIsRegistering(true);
     setPermissionMessage(null);
 
-    const result = await registerForPriceAlerts();
-    setIsRegistering(false);
+    try {
+      const result = await registerForPriceAlerts();
 
-    if (result.status === 'registered') {
-      setPermissionStatus('granted');
-      setPermissionMessage(null);
-      await alertsQuery.refetch();
-      return;
+      if (result.status === 'registered') {
+        setPermissionStatus('granted');
+        setPermissionMessage(null);
+        await alertsQuery.refetch();
+        return;
+      }
+
+      setPermissionStatus(result.status === 'denied' ? 'denied' : 'unsupported');
+      setPermissionMessage(result.message);
+    } catch {
+      setPermissionMessage('Cartwise could not register this device for price alerts.');
+    } finally {
+      setIsRegistering(false);
     }
-
-    setPermissionStatus(result.status === 'denied' ? 'denied' : 'unsupported');
-    setPermissionMessage(result.message);
   };
 
   const handleRemoveWatch = (watchId: string, productName: string) => {
@@ -110,10 +123,11 @@ export default function AlertsScreen() {
           contentContainerStyle={styles.content}
           style={styles.scrollView}>
           <View style={styles.header}>
-            <ThemedText type="smallBold" themeColor="accent">
-              Price Alerts
+            <ThemedText type="eyebrow">CARTWISE</ThemedText>
+            <ThemedText type="display">Alerts</ThemedText>
+            <ThemedText type="small" themeColor="textSecondary">
+              Price drops on items you watch.
             </ThemedText>
-            <ThemedText type="subtitle">Watch for grocery drops</ThemedText>
           </View>
 
           {!isPermissionReady ? (
@@ -124,125 +138,25 @@ export default function AlertsScreen() {
               onEnable={handleEnableAlerts}
             />
           ) : alertsQuery.isLoading ? (
-            <LoadingState />
+            <AlertsLoadingState />
           ) : alertsQuery.isError ? (
-            <MessageState
+            <EmptyState
+              icon={warningIcon}
               title="Could not load alerts"
               message="Pull to refresh or try reopening Cartwise."
             />
           ) : (
             <>
-              <View style={styles.section}>
-                <View style={styles.sectionHeader}>
-                  <ThemedText type="smallBold">Recent drops</ThemedText>
-                  {alerts.length > 0 ? (
-                    <ThemedText type="small" themeColor="textSecondary">
-                      {alerts.length}
-                    </ThemedText>
-                  ) : null}
-                </View>
-
-                {alerts.length === 0 ? (
-                  <MessageState
-                    title="No price drops yet"
-                    message="No price drops yet - finalize a cart to start watching prices."
-                  />
-                ) : (
-                  <View style={styles.stack}>
-                    {alerts.map((alert) => (
-                      <Pressable
-                        key={alert.id}
-                        accessibilityRole="button"
-                        accessibilityLabel={`Mark ${alert.productName} price drop as read`}
-                        disabled={markAlertRead.isPending}
-                        onPress={() => {
-                          if (!alert.read) {
-                            markAlertRead.mutate(alert.id);
-                          }
-                        }}
-                        style={({ pressed }) => [
-                          pressed && styles.pressed,
-                          markAlertRead.isPending && styles.disabled,
-                        ]}>
-                        <ThemedView type="backgroundElement" style={styles.alertCard}>
-                          <View style={styles.alertCopy}>
-                            <View style={styles.alertTitleRow}>
-                              {!alert.read ? (
-                                <View
-                                  accessibilityLabel="Unread alert"
-                                  style={[styles.unreadDot, { backgroundColor: theme.accent }]}
-                                />
-                              ) : null}
-                              <ThemedText type="smallBold" style={styles.alertTitle}>
-                                {alert.productName}
-                              </ThemedText>
-                            </View>
-                            <ThemedText type="small" themeColor="textSecondary">
-                              {alert.storeName}
-                            </ThemedText>
-                            <ThemedText type="smallBold" style={styles.priceDropText}>
-                              was {formatPrice(alert.oldPrice)} {'\u2192'} now{' '}
-                              <ThemedText type="smallBold" style={styles.savingsText}>
-                                {formatPrice(alert.newPrice)}
-                              </ThemedText>
-                            </ThemedText>
-                          </View>
-                          <ThemedText type="small" themeColor="textSecondary" style={styles.timeText}>
-                            {formatRelativeTime(alert.capturedAt) ?? 'freshness unknown'}
-                          </ThemedText>
-                        </ThemedView>
-                      </Pressable>
-                    ))}
-                  </View>
-                )}
-              </View>
-
-              <View style={styles.section}>
-                <View style={styles.sectionHeader}>
-                  <ThemedText type="smallBold">Watched items</ThemedText>
-                  {watches.length > 0 ? (
-                    <ThemedText type="small" themeColor="textSecondary">
-                      {watches.length}
-                    </ThemedText>
-                  ) : null}
-                </View>
-
-                {watches.length === 0 ? (
-                  <MessageState
-                    title="No watched items"
-                    message="Finalize a cart to watch those items for future drops."
-                  />
-                ) : (
-                  <View style={styles.stack}>
-                    {watches.map((watch) => (
-                      <ThemedView key={watch.id} type="backgroundElement" style={styles.watchCard}>
-                        <View style={styles.watchCopy}>
-                          <ThemedText type="smallBold">{watch.productName}</ThemedText>
-                          <ThemedText type="small" themeColor="textSecondary">
-                            Baseline {formatPrice(watch.baselinePrice)} across{' '}
-                            {watch.storeIds.length} stores
-                          </ThemedText>
-                        </View>
-                        <Pressable
-                          accessibilityRole="button"
-                          accessibilityLabel={`Remove ${watch.productName} from watched items`}
-                          disabled={removeWatch.isPending}
-                          hitSlop={8}
-                          onPress={() => handleRemoveWatch(watch.id, watch.productName)}
-                          style={({ pressed }) => [
-                            styles.removeButton,
-                            pressed && styles.pressed,
-                            removeWatch.isPending && styles.disabled,
-                          ]}>
-                          <ThemedText type="smallBold" themeColor="danger">
-                            Remove
-                          </ThemedText>
-                        </Pressable>
-                      </ThemedView>
-                    ))}
-                  </View>
-                )}
-              </View>
+              <RecentDropsSection
+                alerts={alerts}
+                disabled={markAlertRead.isPending}
+                onMarkRead={(alertId) => markAlertRead.mutate(alertId)}
+              />
+              <WatchedItemsSection
+                disabled={removeWatch.isPending}
+                watches={watches}
+                onRemove={handleRemoveWatch}
+              />
             </>
           )}
         </ScrollView>
@@ -274,57 +188,240 @@ function PermissionCard({
         : null);
 
   return (
-    <ThemedView type="backgroundElement" style={styles.permissionCard}>
+    <Card style={styles.permissionCard}>
+      <View style={[styles.iconWell, { backgroundColor: theme.accentMuted }]}>
+        <SymbolView name={bellIcon} tintColor={theme.accent} size={26} />
+      </View>
       <View style={styles.permissionCopy}>
-        <ThemedText type="smallBold">Get notified when prices drop on items you buy</ThemedText>
+        <ThemedText type="heading">Know when prices drop</ThemedText>
         <ThemedText type="small" themeColor="textSecondary">
-          Cartwise can watch finalized cart items and let you know when nearby stores lower the
+          Cartwise watches items from finalized carts and tells you when a nearby store cuts the
           price.
         </ThemedText>
         {statusMessage ? (
-          <ThemedText type="small" themeColor={isDenied || isUnsupported ? 'danger' : 'textSecondary'}>
+          <ThemedText
+            type="small"
+            themeColor={isDenied || isUnsupported ? 'danger' : 'textSecondary'}>
             {statusMessage}
           </ThemedText>
         ) : null}
-      </View>
-      <Pressable
-        accessibilityRole="button"
-        disabled={disabled || isUnsupported}
-        onPress={onEnable}
-        style={({ pressed }) => [
-          styles.primaryButton,
-          { backgroundColor: theme.accent },
-          pressed && styles.pressed,
-          (disabled || isUnsupported) && styles.disabled,
-        ]}>
-        {disabled ? (
-          <ActivityIndicator color="#ffffff" />
-        ) : (
-          <ThemedText type="smallBold" style={styles.primaryButtonText}>
-            Enable price alerts
+        {isDenied ? (
+          <ThemedText type="caption" themeColor="textSecondary">
+            Open system notification settings, allow Cartwise, then return here.
           </ThemedText>
-        )}
-      </Pressable>
-    </ThemedView>
+        ) : null}
+      </View>
+      <AppButton
+        label="Enable price alerts"
+        haptic="success"
+        loading={disabled}
+        disabled={isUnsupported}
+        onPress={onEnable}
+      />
+    </Card>
   );
 }
 
-function LoadingState() {
+function RecentDropsSection({
+  alerts,
+  disabled,
+  onMarkRead,
+}: {
+  alerts: {
+    id: string;
+    productName: string;
+    storeName: string;
+    oldPrice: number;
+    newPrice: number;
+    capturedAt: string;
+    read: boolean;
+  }[];
+  disabled: boolean;
+  onMarkRead: (alertId: string) => void;
+}) {
+  const theme = useTheme();
+
   return (
-    <ThemedView type="backgroundElement" style={styles.messageState}>
-      <ActivityIndicator color={SAVINGS_GREEN} />
-    </ThemedView>
+    <View style={styles.section}>
+      <SectionHeader label="RECENT DROPS" count={`${alerts.length} drops`} />
+
+      {alerts.length === 0 ? (
+        <EmptyState
+          icon={bellIcon}
+          title="No price drops yet"
+          message="You'll hear the moment a watched price falls."
+        />
+      ) : (
+        <Card flush>
+          {alerts.map((alert, index) => {
+            const savings = Math.max(0, alert.oldPrice - alert.newPrice);
+
+            return (
+              <Pressable
+                key={alert.id}
+                accessibilityRole="button"
+                accessibilityLabel={`Mark ${alert.productName} price drop as read`}
+                disabled={disabled}
+                onPress={() => {
+                  if (!alert.read) {
+                    onMarkRead(alert.id);
+                  }
+                }}
+                style={({ pressed }) => [
+                  styles.dropRow,
+                  index > 0 && styles.rowDivider,
+                  index > 0 && { borderTopColor: theme.border },
+                  pressed && { backgroundColor: theme.backgroundSelected },
+                  disabled && styles.disabled,
+                ]}>
+                <View style={styles.unreadSlot}>
+                  {!alert.read ? (
+                    <View
+                      accessibilityLabel="Unread alert"
+                      style={[styles.unreadDot, { backgroundColor: theme.accent }]}
+                    />
+                  ) : null}
+                </View>
+                <View style={styles.dropCopy}>
+                  <ThemedText type="smallBold" numberOfLines={2}>
+                    {alert.productName}
+                  </ThemedText>
+                  <ThemedText type="caption" themeColor="textSecondary" numberOfLines={1}>
+                    {alert.storeName}
+                  </ThemedText>
+                  <View style={styles.priceMovement}>
+                    <PriceText value={alert.oldPrice} size="sm" strike />
+                    <ThemedText type="caption" themeColor="textSecondary">
+                      →
+                    </ThemedText>
+                    <PriceText value={alert.newPrice} size="sm" color="accent" />
+                    <Chip label={`−${formatPrice(savings)}`} tone="deal" />
+                  </View>
+                </View>
+                <ThemedText type="stamp" style={styles.dropTime}>
+                  {formatRelativeTime(alert.capturedAt) ?? 'freshness unknown'}
+                </ThemedText>
+              </Pressable>
+            );
+          })}
+        </Card>
+      )}
+    </View>
   );
 }
 
-function MessageState({ title, message }: { title: string; message: string }) {
+function WatchedItemsSection({
+  disabled,
+  watches,
+  onRemove,
+}: {
+  disabled: boolean;
+  watches: {
+    id: string;
+    productName: string;
+    baselinePrice: number;
+    storeIds: string[];
+  }[];
+  onRemove: (watchId: string, productName: string) => void;
+}) {
+  const theme = useTheme();
+
   return (
-    <ThemedView type="backgroundElement" style={styles.messageState}>
-      <ThemedText type="smallBold">{title}</ThemedText>
-      <ThemedText type="small" themeColor="textSecondary" style={styles.messageText}>
-        {message}
+    <View style={styles.section}>
+      <SectionHeader label="WATCHED ITEMS" count={`${watches.length} watched`} />
+
+      {watches.length === 0 ? (
+        <EmptyState
+          icon={bellIcon}
+          title="No watched items"
+          message="Finalize a cart to watch those items for future drops."
+        />
+      ) : (
+        <Card flush>
+          {watches.map((watch, index) => (
+            <View
+              key={watch.id}
+              style={[
+                styles.watchRow,
+                index > 0 && styles.rowDivider,
+                index > 0 && { borderTopColor: theme.border },
+              ]}>
+              <View style={styles.watchCopy}>
+                <ThemedText type="smallBold" numberOfLines={2}>
+                  {watch.productName}
+                </ThemedText>
+                <ThemedText type="caption" themeColor="textSecondary" numberOfLines={1}>
+                  baseline {formatPrice(watch.baselinePrice)} · {watch.storeIds.length}{' '}
+                  {watch.storeIds.length === 1 ? 'store' : 'stores'}
+                </ThemedText>
+              </View>
+              <AppButton
+                label="Remove"
+                variant="ghost"
+                disabled={disabled}
+                onPress={() => onRemove(watch.id, watch.productName)}
+                style={styles.removeButton}
+              />
+            </View>
+          ))}
+        </Card>
+      )}
+    </View>
+  );
+}
+
+function AlertsLoadingState() {
+  const theme = useTheme();
+
+  return (
+    <>
+      <View style={styles.section}>
+        <SectionHeader label="RECENT DROPS" count="loading" />
+        <Card flush>
+          {[0, 1, 2].map((item, index) => (
+            <View
+              key={item}
+              style={[
+                styles.skeletonRow,
+                index > 0 && styles.rowDivider,
+                index > 0 && { borderTopColor: theme.border },
+              ]}>
+              <Skeleton height={18} width="64%" />
+              <Skeleton height={14} width="42%" />
+              <Skeleton height={24} width="78%" />
+            </View>
+          ))}
+        </Card>
+      </View>
+      <View style={styles.section}>
+        <SectionHeader label="WATCHED ITEMS" count="loading" />
+        <Card flush>
+          {[0, 1].map((item, index) => (
+            <View
+              key={item}
+              style={[
+                styles.skeletonRow,
+                index > 0 && styles.rowDivider,
+                index > 0 && { borderTopColor: theme.border },
+              ]}>
+              <Skeleton height={18} width="58%" />
+              <Skeleton height={14} width="48%" />
+            </View>
+          ))}
+        </Card>
+      </View>
+    </>
+  );
+}
+
+function SectionHeader({ label, count }: { label: string; count: string }) {
+  return (
+    <View style={styles.sectionHeader}>
+      <ThemedText type="eyebrow">{label}</ThemedText>
+      <ThemedText type="caption" themeColor="textSecondary">
+        {count}
       </ThemedText>
-    </ThemedView>
+    </View>
   );
 }
 
@@ -349,100 +446,87 @@ const styles = StyleSheet.create({
     gap: Spacing.four,
   },
   header: {
-    gap: Spacing.two,
+    gap: Spacing.one,
   },
   section: {
-    gap: Spacing.three,
+    gap: Spacing.two,
   },
   sectionHeader: {
-    minHeight: 28,
+    minHeight: 24,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-  },
-  stack: {
     gap: Spacing.three,
   },
   permissionCard: {
-    borderRadius: 8,
-    padding: Spacing.four,
     gap: Spacing.three,
+  },
+  iconWell: {
+    width: 52,
+    height: 52,
+    borderRadius: Radii.chip,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   permissionCopy: {
     gap: Spacing.two,
   },
-  primaryButton: {
-    minHeight: 52,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: Spacing.three,
-  },
-  primaryButtonText: {
-    color: '#ffffff',
-  },
-  alertCard: {
-    borderRadius: 8,
-    padding: Spacing.three,
+  dropRow: {
+    minHeight: 88,
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: Spacing.three,
-  },
-  alertCopy: {
-    flex: 1,
-    gap: Spacing.one,
-  },
-  alertTitleRow: {
-    minHeight: 22,
-    flexDirection: 'row',
-    alignItems: 'center',
     gap: Spacing.two,
+    padding: Spacing.three,
+  },
+  rowDivider: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  unreadSlot: {
+    width: 8,
+    minHeight: 20,
+    alignItems: 'center',
+    paddingTop: 6,
   },
   unreadDot: {
     width: 8,
     height: 8,
-    borderRadius: 4,
+    borderRadius: Radii.chip,
   },
-  alertTitle: {
+  dropCopy: {
     flex: 1,
+    minWidth: 0,
+    gap: Spacing.one,
   },
-  priceDropText: {
-    marginTop: Spacing.one,
+  priceMovement: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: Spacing.two,
+    paddingTop: Spacing.one,
   },
-  savingsText: {
-    color: SAVINGS_GREEN,
-  },
-  timeText: {
+  dropTime: {
+    minWidth: 72,
     textAlign: 'right',
+    paddingTop: Spacing.half,
   },
-  watchCard: {
-    borderRadius: 8,
-    padding: Spacing.three,
+  watchRow: {
+    minHeight: 72,
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.three,
+    padding: Spacing.three,
   },
   watchCopy: {
     flex: 1,
+    minWidth: 0,
     gap: Spacing.one,
   },
   removeButton: {
-    minHeight: 36,
-    justifyContent: 'center',
+    minWidth: 86,
   },
-  messageState: {
-    minHeight: 160,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: Spacing.four,
-    gap: Spacing.one,
-  },
-  messageText: {
-    textAlign: 'center',
-  },
-  pressed: {
-    opacity: 0.72,
+  skeletonRow: {
+    padding: Spacing.three,
+    gap: Spacing.two,
   },
   disabled: {
     opacity: 0.5,

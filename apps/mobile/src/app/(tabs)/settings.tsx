@@ -1,14 +1,16 @@
 import { useMemo } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useStores } from '@/api/queries';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { AppButton } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { useTheme } from '@/hooks/use-theme';
 import { chainLabel } from '@/lib/price';
 import { usePreferencesStore } from '@/state/preferences';
-import { useTheme } from '@/hooks/use-theme';
 
 export default function SettingsScreen() {
   const zip = usePreferencesStore((state) => state.zip);
@@ -23,57 +25,79 @@ export default function SettingsScreen() {
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         <ScrollView contentContainerStyle={styles.content} style={styles.scrollView}>
           <View style={styles.header}>
-            <ThemedText type="subtitle">Settings</ThemedText>
-            <ThemedText themeColor="textSecondary">
-              Cartwise compares nearby grocery stores automatically.
-            </ThemedText>
+            <ThemedText type="eyebrow">CARTWISE</ThemedText>
+            <ThemedText type="display">Settings</ThemedText>
           </View>
 
-          <ThemedView type="backgroundElement" style={styles.panel}>
-            <ThemedText type="small" themeColor="textSecondary">
-              Location ZIP
-            </ThemedText>
-            <ThemedText type="smallBold">{zip || 'Not set'}</ThemedText>
-          </ThemedView>
+          <Card style={styles.locationCard}>
+            <View style={styles.locationCopy}>
+              <ThemedText type="eyebrow">LOCATION</ThemedText>
+              <ThemedText type="title" themeColor={zip ? 'text' : 'textSecondary'}>
+                {zip || 'Not set'}
+              </ThemedText>
+            </View>
+            <AppButton
+              label="Change location"
+              variant="secondary"
+              onPress={resetLocation}
+              style={styles.locationButton}
+            />
+          </Card>
 
           <View style={styles.section}>
-            <ThemedText type="smallBold">Nearby stores</ThemedText>
-            {activeStores.length > 0 ? (
-              activeStores.map((store) => (
-                <ThemedView key={store.id} type="backgroundElement" style={styles.storeRow}>
-                  <View style={styles.storeCopy}>
-                    <ThemedText type="smallBold">{store.name}</ThemedText>
-                    <ThemedText type="small" themeColor="textSecondary">
-                      {chainLabel(store.chain)} · {store.distanceMiles?.toFixed(1) ?? '--'} mi
+            <SectionHeader label="NEARBY STORES" count={`${activeStores.length} stores`} />
+
+            <Card flush>
+              {activeStores.length > 0 ? (
+                activeStores.map((store, index) => (
+                  <View
+                    key={store.id}
+                    style={[
+                      styles.storeRow,
+                      index > 0 && styles.rowDivider,
+                      index > 0 && { borderTopColor: theme.border },
+                    ]}>
+                    <ThemedText type="smallBold" numberOfLines={1}>
+                      {store.name}
+                    </ThemedText>
+                    <ThemedText type="caption" themeColor="textSecondary" numberOfLines={1}>
+                      {chainLabel(store.chain)} · {formatDistance(store.distanceMiles)} mi
                     </ThemedText>
                   </View>
-                </ThemedView>
-              ))
-            ) : (
-              <ThemedView type="backgroundElement" style={styles.storeRow}>
-                <ThemedText type="small" themeColor="textSecondary">
-                  Cartwise is comparing all nearby stores for this location.
-                </ThemedText>
-              </ThemedView>
-            )}
+                ))
+              ) : (
+                <View style={styles.storeRow}>
+                  <ThemedText type="small" themeColor="textSecondary">
+                    Cartwise is comparing all nearby stores for this location.
+                  </ThemedText>
+                </View>
+              )}
+            </Card>
           </View>
 
-          <Pressable
-            accessibilityRole="button"
-            onPress={resetLocation}
-            style={({ pressed }) => [
-              styles.secondaryButton,
-              { borderColor: theme.border },
-              pressed && styles.pressed,
-            ]}>
-            <ThemedText type="smallBold">
-              Change location
-            </ThemedText>
-          </Pressable>
+          <ThemedText type="stamp" style={styles.footer}>
+            Cartwise compares Kroger, Walmart, Target, and ALDI. Prices are cached briefly and
+            always stamped.
+          </ThemedText>
         </ScrollView>
       </SafeAreaView>
     </ThemedView>
   );
+}
+
+function SectionHeader({ label, count }: { label: string; count: string }) {
+  return (
+    <View style={styles.sectionHeader}>
+      <ThemedText type="eyebrow">{label}</ThemedText>
+      <ThemedText type="caption" themeColor="textSecondary">
+        {count}
+      </ThemedText>
+    </View>
+  );
+}
+
+function formatDistance(distanceMiles: number | undefined) {
+  return distanceMiles?.toFixed(1) ?? '--';
 }
 
 const styles = StyleSheet.create({
@@ -94,45 +118,40 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.four,
     paddingTop: Spacing.four,
     paddingBottom: BottomTabInset + Spacing.five,
-    gap: Spacing.three,
+    gap: Spacing.four,
   },
   header: {
-    gap: Spacing.two,
-  },
-  panel: {
-    borderRadius: 8,
-    padding: Spacing.three,
     gap: Spacing.one,
+  },
+  locationCard: {
+    gap: Spacing.three,
+  },
+  locationCopy: {
+    gap: Spacing.one,
+  },
+  locationButton: {
+    alignSelf: 'flex-start',
   },
   section: {
     gap: Spacing.two,
   },
+  sectionHeader: {
+    minHeight: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.three,
+  },
   storeRow: {
-    borderRadius: 8,
+    minHeight: 64,
+    justifyContent: 'center',
+    gap: Spacing.one,
     padding: Spacing.three,
   },
-  storeCopy: {
-    gap: Spacing.one,
+  rowDivider: {
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
-  button: {
-    minHeight: 52,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: Spacing.three,
-  },
-  buttonText: {
-    color: '#ffffff',
-  },
-  secondaryButton: {
-    minHeight: 52,
-    borderRadius: 8,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: Spacing.three,
-  },
-  pressed: {
-    opacity: 0.72,
+  footer: {
+    paddingBottom: Spacing.two,
   },
 });
