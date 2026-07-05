@@ -20,6 +20,16 @@ type PersistedPreferencesState = Pick<
   'zip' | 'selectedStoreIds' | 'locationConfirmed'
 >;
 
+// Expo Router pre-renders the app in Node for web, where AsyncStorage's
+// localStorage backend does not exist; persist against a no-op there.
+const canUseDeviceStorage = typeof window !== 'undefined';
+
+const noopStorage = {
+  getItem: async () => null,
+  setItem: async () => {},
+  removeItem: async () => {},
+};
+
 export const usePreferencesStore = create<PreferencesState>()(
   persist(
     (set) => ({
@@ -37,7 +47,7 @@ export const usePreferencesStore = create<PreferencesState>()(
     }),
     {
       name: 'cartwise-preferences',
-      storage: createJSONStorage(() => AsyncStorage),
+      storage: createJSONStorage(() => (canUseDeviceStorage ? AsyncStorage : noopStorage)),
       partialize: (state) => ({
         zip: state.zip,
         selectedStoreIds: state.selectedStoreIds,
