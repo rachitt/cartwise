@@ -248,6 +248,45 @@ describe("TargetCollector", () => {
     expect(url.searchParams.get("visitor_id")).toMatch(/^[A-F0-9]{32}$/);
   });
 
+  it("maps zero and negative CDUI prices to null", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-04T12:00:00Z"));
+    const fetchMock = queuedFetch([
+      jsonResponse(targetLocation({ id: "1092" })),
+      jsonResponse(
+        targetCduiResponse([
+          targetProduct({
+            tcin: "zero-price",
+            title: "Zero Price Item",
+            currentRetail: 0,
+            regularRetail: 3.49,
+          }),
+          targetProduct({
+            tcin: "negative-price",
+            title: "Negative Price Item",
+            currentRetail: -1,
+            regularRetail: 3.49,
+          }),
+        ]),
+      ),
+    ]);
+    const collector = new TargetCollector({ apiKey: "test-key", fetch: fetchMock });
+
+    await expect(collector.searchProducts("water", "1092")).resolves.toMatchObject([
+      {
+        externalProductId: "zero-price",
+        price: null,
+        promoPrice: null,
+      },
+      {
+        externalProductId: "negative-price",
+        price: null,
+        promoPrice: null,
+      },
+    ]);
+    vi.useRealTimers();
+  });
+
   it("maps exact TCIN price lookups and skips missing products", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-04T12:00:00Z"));
@@ -326,6 +365,40 @@ describe("TargetCollector", () => {
     expect(new Set(urls.slice(1).map((url) => url.searchParams.get("visitor_id"))).size).toBe(1);
   });
 
+  it("caps concurrent CDUI price lookups", async () => {
+    let activeCduiRequests = 0;
+    let maxActiveCduiRequests = 0;
+    const fetchMock = vi.fn<typeof fetch>(async (url) => {
+      const requestUrl = new URL(String(url));
+      if (requestUrl.hostname === "api.target.com") {
+        return jsonResponse(targetLocation({ id: "1092" }));
+      }
+
+      activeCduiRequests += 1;
+      maxActiveCduiRequests = Math.max(maxActiveCduiRequests, activeCduiRequests);
+      await new Promise((resolve) => {
+        setTimeout(resolve, 5);
+      });
+      activeCduiRequests -= 1;
+
+      const tcin = requestUrl.searchParams.get("keyword") ?? "unknown";
+      return jsonResponse(
+        targetCduiResponse([
+          targetProduct({
+            tcin,
+            title: `Target Item ${tcin}`,
+            currentRetail: 1.99,
+          }),
+        ]),
+      );
+    });
+    const collector = new TargetCollector({ apiKey: "test-key", fetch: fetchMock });
+
+    await expect(collector.getPrices(["1", "2", "3", "4"], "1092")).resolves.toHaveLength(4);
+
+    expect(maxActiveCduiRequests).toBeLessThanOrEqual(2);
+  });
+
   it("retries one 429 response using Retry-After", async () => {
     const fetchMock = queuedFetch([
       jsonResponse(targetLocation({ id: "1092" })),
@@ -339,6 +412,21 @@ describe("TargetCollector", () => {
     expect(fetchMock.mock.calls).toHaveLength(3);
     expect(String(fetchMock.mock.calls[1]?.[0])).toContain("/cdui_orchestrations/v1/pages/slp");
     expect(String(fetchMock.mock.calls[2]?.[0])).toContain("/cdui_orchestrations/v1/pages/slp");
+  });
+
+  it("fails fast when Retry-After exceeds the collector clamp", async () => {
+    const fetchMock = queuedFetch([
+      jsonResponse(targetLocation({ id: "1092" })),
+      new Response(null, { status: 429, headers: { "Retry-After": "86400" } }),
+    ]);
+    const collector = new TargetCollector({ apiKey: "test-key", fetch: fetchMock });
+
+    await expect(collector.searchProducts("milk", "1092")).rejects.toMatchObject({
+      kind: "rate-limit",
+    });
+
+    expect(fetchMock.mock.calls).toHaveLength(2);
+    expect(String(fetchMock.mock.calls[1]?.[0])).toContain("/cdui_orchestrations/v1/pages/slp");
   });
 
   it("re-scrapes the web key and retries once after a Target API 403", async () => {
@@ -365,6 +453,31 @@ describe("TargetCollector", () => {
     expect(firstLocationUrl.searchParams.get("key")).toBe(firstKey);
     expect(retriedLocationUrl.searchParams.get("key")).toBe(refreshedKey);
     expect(cduiUrl.searchParams.get("key")).toBe(refreshedKey);
+  });
+
+  it("shares one in-flight web key scrape across concurrent cold calls", async () => {
+    const webKey = "a".repeat(40);
+    const fetchMock = vi.fn<typeof fetch>(async (url) => {
+      const requestUrl = String(url);
+      if (requestUrl === "https://www.target.com/") {
+        return htmlResponse(`"apiKey":"${webKey}"`);
+      }
+
+      if (new URL(requestUrl).hostname === "api.target.com") {
+        return jsonResponse(targetLocation({ id: "1092" }));
+      }
+
+      return jsonResponse(targetCduiResponse([]));
+    });
+    const collector = new TargetCollector({ fetch: fetchMock });
+
+    await Promise.all([
+      collector.searchProducts("milk", "1092"),
+      collector.searchProducts("eggs", "1092"),
+    ]);
+
+    const webKeyCalls = fetchMock.mock.calls.filter(([url]) => url === "https://www.target.com/");
+    expect(webKeyCalls).toHaveLength(1);
   });
 
   it("maps a second Target API 403 to an auth error", async () => {

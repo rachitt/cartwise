@@ -1,9 +1,10 @@
 import type { CollectedProduct, CollectedStore, Collector } from "./types.js";
+import type { CollectorHttp } from "./http.js";
+import { createCollectorHttp, getRetryDelayMs, sleep } from "./http.js";
 import { CollectorError } from "./types.js";
 
 const KROGER_BASE_URL = "https://api.kroger.com";
 const TOKEN_REFRESH_SKEW_MS = 60_000;
-const DEFAULT_RATE_LIMIT_BACKOFF_MS = 250;
 const NON_GROCERY_LOCATION_NAME_PATTERNS = [
   /\bfuel\b/i,
   /\bfuel center\b/i,
@@ -73,8 +74,10 @@ export class KrogerCollector implements Collector {
   private readonly clientId: string;
   private readonly clientSecret: string;
   private readonly fetchImpl: typeof fetch;
+  private readonly http: CollectorHttp;
   private accessToken: string | null = null;
   private tokenExpiresAt = 0;
+  private tokenRefreshPromise: Promise<string> | null = null;
 
   constructor(options: KrogerCollectorOptions = {}) {
     this.clientId = options.clientId ?? process.env.KROGER_CLIENT_ID ?? "";
@@ -88,6 +91,8 @@ export class KrogerCollector implements Collector {
     if (!this.fetchImpl) {
       throw new Error("KrogerCollector requires a fetch implementation");
     }
+
+    this.http = createCollectorHttp({ chain: this.chain, fetch: this.fetchImpl });
   }
 
   async findStores(zip: string): Promise<CollectedStore[]> {
@@ -144,7 +149,7 @@ export class KrogerCollector implements Collector {
 
   private async request<T>(path: string, didRetryAuth = false, didRetryRateLimit = false): Promise<T> {
     const token = await this.getAccessToken();
-    const response = await this.fetchImpl(`${KROGER_BASE_URL}${path}`, {
+    const response = await this.http.request(`${KROGER_BASE_URL}${path}`, {
       headers: {
         Accept: "application/json",
         Authorization: `Bearer ${token}`,
@@ -153,6 +158,7 @@ export class KrogerCollector implements Collector {
 
     if (response.status === 401) {
       this.accessToken = null;
+      this.tokenExpiresAt = 0;
 
       if (!didRetryAuth) {
         return this.request<T>(path, true, didRetryRateLimit);
@@ -163,7 +169,12 @@ export class KrogerCollector implements Collector {
 
     if (response.status === 429) {
       if (!didRetryRateLimit) {
-        await sleep(getRetryDelayMs(response.headers.get("retry-after")));
+        const retryDelayMs = getRetryDelayMs(response.headers.get("retry-after"));
+        if (retryDelayMs === null) {
+          throw new CollectorError(this.chain, "rate-limit", "Kroger API rate limit exceeded");
+        }
+
+        await sleep(retryDelayMs);
         return this.request<T>(path, didRetryAuth, true);
       }
 
@@ -186,8 +197,20 @@ export class KrogerCollector implements Collector {
       return this.accessToken;
     }
 
+    if (this.tokenRefreshPromise) {
+      return this.tokenRefreshPromise;
+    }
+
+    this.tokenRefreshPromise = this.refreshAccessToken().finally(() => {
+      this.tokenRefreshPromise = null;
+    });
+
+    return this.tokenRefreshPromise;
+  }
+
+  private async refreshAccessToken(): Promise<string> {
     const credentials = Buffer.from(`${this.clientId}:${this.clientSecret}`).toString("base64");
-    const response = await this.fetchImpl(`${KROGER_BASE_URL}/v1/connect/oauth2/token`, {
+    const response = await this.http.request(`${KROGER_BASE_URL}/v1/connect/oauth2/token`, {
       method: "POST",
       headers: {
         Authorization: `Basic ${credentials}`,
@@ -267,8 +290,8 @@ export class KrogerCollector implements Collector {
 
     return products.map((product) => {
       const item = product.items?.[0];
-      const price = optionalNumber(item?.price?.regular);
-      const promoPrice = optionalNumber(item?.price?.promo);
+      const price = optionalPositiveNumber(item?.price?.regular);
+      const promoPrice = price === null ? null : optionalPositiveNumber(item?.price?.promo);
 
       return {
         externalProductId: requiredString(product.productId, "productId"),
@@ -279,7 +302,7 @@ export class KrogerCollector implements Collector {
         category: firstString(product.categories),
         imageUrl: frontMediumImageUrl(product.images),
         price,
-        promoPrice: promoPrice && promoPrice > 0 ? promoPrice : null,
+        promoPrice,
         capturedAt,
       };
     });
@@ -346,6 +369,11 @@ function optionalNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function optionalPositiveNumber(value: unknown): number | null {
+  const numberValue = optionalNumber(value);
+  return numberValue !== null && numberValue > 0 ? numberValue : null;
+}
+
 function firstString(value: unknown): string | null {
   if (!Array.isArray(value)) {
     return null;
@@ -378,28 +406,4 @@ function frontMediumImageUrl(images: unknown): string | null {
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
-}
-
-function getRetryDelayMs(retryAfter: string | null): number {
-  if (!retryAfter) {
-    return DEFAULT_RATE_LIMIT_BACKOFF_MS;
-  }
-
-  const seconds = Number(retryAfter);
-  if (Number.isFinite(seconds)) {
-    return Math.max(0, seconds * 1_000);
-  }
-
-  const retryAt = Date.parse(retryAfter);
-  if (Number.isFinite(retryAt)) {
-    return Math.max(0, retryAt - Date.now());
-  }
-
-  return DEFAULT_RATE_LIMIT_BACKOFF_MS;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
 }

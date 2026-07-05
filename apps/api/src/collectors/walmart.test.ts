@@ -150,6 +150,44 @@ describe("WalmartCollector", () => {
     vi.useRealTimers();
   });
 
+  it("maps zero and negative Walmart prices to null", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-04T12:00:00Z"));
+    const fetchMock = queuedFetch([
+      jsonResponse({
+        items: [
+          {
+            itemId: "zero-price",
+            name: "Zero Price Item",
+            salePrice: 0,
+            msrp: 2.98,
+          },
+          {
+            itemId: "negative-price",
+            name: "Negative Price Item",
+            currentPrice: { price: "-1" },
+            listPrice: 2.98,
+          },
+        ],
+      }),
+    ]);
+    const collector = walmartCollector(fetchMock);
+
+    await expect(collector.searchProducts("milk", "1521")).resolves.toMatchObject([
+      {
+        externalProductId: "zero-price",
+        price: null,
+        promoPrice: null,
+      },
+      {
+        externalProductId: "negative-price",
+        price: null,
+        promoPrice: null,
+      },
+    ]);
+    vi.useRealTimers();
+  });
+
   it("maps item price lookups and skips missing products", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-04T12:00:00Z"));
@@ -189,6 +227,33 @@ describe("WalmartCollector", () => {
     vi.useRealTimers();
   });
 
+  it("caps concurrent item price lookups", async () => {
+    let activeRequests = 0;
+    let maxActiveRequests = 0;
+    const fetchMock = vi.fn<typeof fetch>(async (url) => {
+      activeRequests += 1;
+      maxActiveRequests = Math.max(maxActiveRequests, activeRequests);
+      await new Promise((resolve) => {
+        setTimeout(resolve, 5);
+      });
+      activeRequests -= 1;
+
+      const itemId = new URL(String(url)).pathname.split("/").at(-1) ?? "unknown";
+      return jsonResponse({
+        item: {
+          itemId,
+          name: `Walmart Item ${itemId}`,
+          salePrice: 1.99,
+        },
+      });
+    });
+    const collector = walmartCollector(fetchMock);
+
+    await expect(collector.getPrices(["1", "2", "3", "4"], "1521")).resolves.toHaveLength(4);
+
+    expect(maxActiveRequests).toBeLessThanOrEqual(2);
+  });
+
   it("maps Walmart auth failures", async () => {
     const fetchMock = queuedFetch([new Response(null, { status: 403 })]);
     const collector = walmartCollector(fetchMock);
@@ -196,6 +261,19 @@ describe("WalmartCollector", () => {
     await expect(collector.searchProducts("milk", "1521")).rejects.toMatchObject({
       kind: "auth",
     });
+  });
+
+  it("fails fast on Walmart 429 responses with long Retry-After values", async () => {
+    const fetchMock = queuedFetch([
+      new Response(null, { status: 429, headers: { "Retry-After": "86400" } }),
+    ]);
+    const collector = walmartCollector(fetchMock);
+
+    await expect(collector.searchProducts("milk", "1521")).rejects.toMatchObject({
+      kind: "rate-limit",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
 
