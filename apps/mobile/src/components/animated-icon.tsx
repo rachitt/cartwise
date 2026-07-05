@@ -1,50 +1,31 @@
-import { Image } from 'expo-image';
+import * as Font from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
 import { useState } from 'react';
-import { Dimensions, StyleSheet, View } from 'react-native';
-import Animated, { Easing, Keyframe } from 'react-native-reanimated';
+import { StyleSheet, View } from 'react-native';
+import Animated, { Easing, Keyframe, useReducedMotion } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 
-const INITIAL_SCALE_FACTOR = Dimensions.get('screen').height / 90;
-const DURATION = 600;
+import { Colors, FontFamilies, Motion, Radii, Spacing } from '@/constants/theme';
+
+const DURATION = Motion.base;
 
 export function AnimatedSplashOverlay() {
   const [animate, setAnimate] = useState(false);
   const [visible, setVisible] = useState(true);
+  const reducedMotion = useReducedMotion();
 
   if (!visible) return null;
 
-  const splashKeyframe = new Keyframe({
-    0: {
-      transform: [{ scale: 1 }],
-      opacity: 1,
-    },
-    20: {
-      opacity: 1,
-    },
-    70: {
-      opacity: 0,
-      easing: Easing.elastic(0.7),
-    },
-    100: {
-      opacity: 0,
-      transform: [{ scale: 1 }],
-      easing: Easing.elastic(0.7),
-    },
-  });
-
-  const image = <Image style={styles.image} source={require('@/assets/images/expo-logo.png')} />;
-
   return animate ? (
     <Animated.View
-      entering={splashKeyframe.duration(DURATION).withCallback((finished) => {
+      entering={getSplashExitKeyframe(reducedMotion).duration(DURATION).withCallback((finished) => {
         'worklet';
         if (finished) {
           scheduleOnRN(setVisible, false);
         }
       })}
       style={styles.splashOverlay}>
-      {image}
+      <CartwiseMark />
     </Animated.View>
   ) : (
     <View
@@ -54,60 +35,78 @@ export function AnimatedSplashOverlay() {
         });
       }}
       style={styles.splashOverlay}>
-      {image}
+      <CartwiseMark />
     </View>
   );
 }
 
-const keyframe = new Keyframe({
+const iconBackgroundKeyframe = new Keyframe({
   0: {
-    transform: [{ scale: INITIAL_SCALE_FACTOR }],
+    transform: [{ scale: 0.94 }],
+    opacity: 0,
   },
   100: {
     transform: [{ scale: 1 }],
-    easing: Easing.elastic(0.7),
-  },
-});
-
-const logoKeyframe = new Keyframe({
-  0: {
-    transform: [{ scale: 1.3 }],
-    opacity: 0,
-  },
-  40: {
-    transform: [{ scale: 1.3 }],
-    opacity: 0,
-    easing: Easing.elastic(0.7),
-  },
-  100: {
     opacity: 1,
-    transform: [{ scale: 1 }],
-    easing: Easing.elastic(0.7),
+    easing: Easing.out(Easing.cubic),
   },
 });
 
-const glowKeyframe = new Keyframe({
+const markKeyframe = new Keyframe({
   0: {
-    transform: [{ rotateZ: '0deg' }],
+    transform: [{ scale: 0.98 }],
+    opacity: 0,
   },
   100: {
-    transform: [{ rotateZ: '7200deg' }],
+    transform: [{ scale: 1 }],
+    opacity: 1,
+    easing: Easing.out(Easing.cubic),
   },
 });
 
 export function AnimatedIcon() {
   return (
     <View style={styles.iconContainer}>
-      <Animated.View entering={glowKeyframe.duration(60 * 1000 * 4)} style={styles.glow}>
-        <Image style={styles.glow} source={require('@/assets/images/logo-glow.png')} />
-      </Animated.View>
-
-      <Animated.View entering={keyframe.duration(DURATION)} style={styles.background} />
-      <Animated.View style={styles.imageContainer} entering={logoKeyframe.duration(DURATION)}>
-        <Image style={styles.image} source={require('@/assets/images/expo-logo.png')} />
+      <Animated.View
+        entering={iconBackgroundKeyframe.duration(DURATION)}
+        style={styles.iconBackground}
+      />
+      <Animated.View entering={markKeyframe.duration(DURATION)} style={styles.imageContainer}>
+        <CartwiseMark compact />
       </Animated.View>
     </View>
   );
+}
+
+function CartwiseMark({ compact = false }: { compact?: boolean }) {
+  const displayFontFamily = Font.isLoaded(FontFamilies.displayBold)
+    ? FontFamilies.displayBold
+    : undefined;
+
+  return (
+    <Animated.Text
+      style={[
+        styles.mark,
+        compact && styles.compactMark,
+        displayFontFamily ? { fontFamily: displayFontFamily } : null,
+      ]}>
+      Cartwise
+    </Animated.Text>
+  );
+}
+
+function getSplashExitKeyframe(reducedMotion: boolean) {
+  return new Keyframe({
+    0: {
+      opacity: 1,
+      transform: [{ scale: 1 }],
+    },
+    100: {
+      opacity: 0,
+      transform: [{ scale: reducedMotion ? 1 : 0.96 }],
+      easing: Easing.out(Easing.cubic),
+    },
+  });
 }
 
 const styles = StyleSheet.create({
@@ -115,32 +114,35 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  glow: {
-    width: 201,
-    height: 201,
-    position: 'absolute',
-  },
   iconContainer: {
     justifyContent: 'center',
     alignItems: 'center',
-    width: 128,
-    height: 128,
+    width: 192,
+    height: 96,
     zIndex: 100,
   },
-  image: {
-    width: 76,
-    height: 71,
-  },
-  background: {
-    borderRadius: 40,
-    experimental_backgroundImage: `linear-gradient(180deg, #3C9FFE, #0274DF)`,
-    width: 128,
-    height: 128,
+  iconBackground: {
+    backgroundColor: Colors.light.accent,
+    borderRadius: Radii.card,
+    width: 192,
+    height: 96,
     position: 'absolute',
+  },
+  mark: {
+    color: Colors.light.onAccent,
+    fontSize: 40,
+    lineHeight: 46,
+    fontWeight: '700',
+    paddingHorizontal: Spacing.two,
+    textAlign: 'center',
+  },
+  compactMark: {
+    fontSize: 34,
+    lineHeight: 40,
   },
   splashOverlay: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: '#208AEF',
+    backgroundColor: Colors.light.accent,
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 1000,
