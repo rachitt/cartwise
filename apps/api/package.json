@@ -8,7 +8,7 @@
     "start": "tsx src/index.ts",
     "smoke:live": "tsx src/dev-live-collectors.ts",
     "typecheck": "tsc --noEmit",
-    "lint": "tsc --noEmit",
+    "lint": "npm run typecheck",
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",

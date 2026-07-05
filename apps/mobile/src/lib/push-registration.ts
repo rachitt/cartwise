@@ -12,11 +12,22 @@ export type PushRegistrationResult =
   | { status: 'denied' | 'error' | 'unsupported'; message: string };
 
 const MOCK_EXPO_PUSH_TOKEN = 'ExponentPushToken[mock-cartwise-price-alerts]';
+const PLACEHOLDER_PROJECT_ID = '00000000-0000-0000-0000-000000000000';
+const EAS_PROJECT_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function getProjectId() {
-  return (
+  const projectId =
     Constants.easConfig?.projectId ??
-    (Constants.expoConfig?.extra?.eas as { projectId?: string } | undefined)?.projectId
+    (Constants.expoConfig?.extra?.eas as { projectId?: string } | undefined)?.projectId;
+  return projectId?.trim();
+}
+
+function isConfiguredProjectId(projectId: string | undefined) {
+  return Boolean(
+    projectId &&
+      projectId !== PLACEHOLDER_PROJECT_ID &&
+      EAS_PROJECT_ID_PATTERN.test(projectId),
   );
 }
 
@@ -77,9 +88,14 @@ export async function registerForPriceAlerts(): Promise<PushRegistrationResult> 
     }
 
     const projectId = getProjectId();
-    const token = await Notifications.getExpoPushTokenAsync(
-      projectId ? { projectId } : undefined,
-    );
+    if (!isConfiguredProjectId(projectId)) {
+      return {
+        status: 'unsupported',
+        message: 'Push alerts are not configured for this build. Set a real EAS project ID and rebuild Cartwise.',
+      };
+    }
+
+    const token = await Notifications.getExpoPushTokenAsync({ projectId });
     await registerPushToken(token.data);
 
     return { status: 'registered', expoPushToken: token.data };

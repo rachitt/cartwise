@@ -1,4 +1,5 @@
 import type { CartOptimization, Product, Store, StorePrice } from '@cartwise/shared';
+import Constants from 'expo-constants';
 
 import {
   createMockCart,
@@ -42,8 +43,9 @@ export type PriceWatch = {
 export type AlertsResponse = { alerts: PriceAlert[]; watches: PriceWatch[] };
 export type PushTokenResponse = { ok: true };
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
-const USE_MOCKS = process.env.EXPO_PUBLIC_USE_MOCKS === '1';
+const DEV_API_FALLBACK_URL = 'http://localhost:3000';
+const API_URL = resolveApiUrl();
+const USE_MOCKS = __DEV__ && process.env.EXPO_PUBLIC_USE_MOCKS === '1';
 const REQUEST_TIMEOUT_MS = 25000;
 
 type RequestJsonOptions = {
@@ -54,6 +56,44 @@ type RequestJsonOptions = {
 
 function toStoreIdsParam(storeIds: string[]) {
   return storeIds.join(',');
+}
+
+function resolveApiUrl() {
+  const configuredUrl = process.env.EXPO_PUBLIC_API_URL?.trim();
+  if (configuredUrl) {
+    return configuredUrl;
+  }
+
+  if (__DEV__) {
+    return getDevApiUrl();
+  }
+
+  throw new Error(
+    'Missing EXPO_PUBLIC_API_URL. Set it to the Cartwise API origin before creating a production build.',
+  );
+}
+
+function getDevApiUrl() {
+  const devServerHost = getDevServerHost(Constants.expoConfig?.hostUri);
+  return devServerHost ? `http://${formatHostForUrl(devServerHost)}:3000` : DEV_API_FALLBACK_URL;
+}
+
+function getDevServerHost(hostUri: string | undefined) {
+  if (!hostUri) {
+    return null;
+  }
+
+  const normalizedHostUri = hostUri.includes('://') ? hostUri : `http://${hostUri}`;
+  try {
+    return new URL(normalizedHostUri).hostname;
+  } catch {
+    const hostMatch = hostUri.match(/^(?:[^:/?#]+:\/\/)?(\[[^\]]+\]|[^:/?#]+)/);
+    return hostMatch?.[1] ?? null;
+  }
+}
+
+function formatHostForUrl(host: string) {
+  return host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
 }
 
 async function requestJson<T>(

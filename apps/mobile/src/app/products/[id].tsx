@@ -13,9 +13,9 @@ import { useTheme } from '@/hooks/use-theme';
 import {
   chainLabel,
   effectivePrice,
+  formatFreshnessStamp,
   formatPrice,
   formatProductSize,
-  formatRelativeTime,
 } from '@/lib/price';
 import { usePreferencesStore } from '@/state/preferences';
 
@@ -123,7 +123,7 @@ export default function ProductDetailScreen() {
                             : price.source}
                         </ThemedText>
                         <ThemedText type="small" themeColor="textSecondary">
-                          as of {formatRelativeTime(price.capturedAt)}
+                          {formatFreshnessStamp(price.capturedAt)}
                         </ThemedText>
                       </View>
                       <View style={styles.priceCopy}>

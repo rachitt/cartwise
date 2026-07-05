@@ -22,9 +22,9 @@ import { useTheme } from '@/hooks/use-theme';
 import {
   chainLabel,
   effectivePrice,
+  formatFreshnessStamp,
   formatPrice,
   formatProductSize,
-  formatRelativeTime,
 } from '@/lib/price';
 import { usePreferencesStore } from '@/state/preferences';
 
@@ -303,7 +303,7 @@ function StorePriceRow({ store, price }: { store: Store; price: StorePrice }) {
       <View style={styles.priceMeta}>
         <ThemedText type="smallBold">{formatPrice(effectivePrice(price))}</ThemedText>
         <ThemedText type="small" themeColor="textSecondary">
-          as of {formatRelativeTime(price.capturedAt)}
+          {formatFreshnessStamp(price.capturedAt)}
         </ThemedText>
       </View>
     </View>
