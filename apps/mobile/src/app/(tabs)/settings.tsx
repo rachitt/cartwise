@@ -12,16 +12,11 @@ import { useTheme } from '@/hooks/use-theme';
 
 export default function SettingsScreen() {
   const zip = usePreferencesStore((state) => state.zip);
-  const selectedStoreIds = usePreferencesStore((state) => state.selectedStoreIds);
   const resetLocation = usePreferencesStore((state) => state.resetLocation);
-  const resetStores = usePreferencesStore((state) => state.resetStores);
   const storesQuery = useStores(zip);
   const theme = useTheme();
 
-  const selectedStores = useMemo(() => {
-    const selected = new Set(selectedStoreIds);
-    return (storesQuery.data?.stores ?? []).filter((store) => selected.has(store.id));
-  }, [selectedStoreIds, storesQuery.data?.stores]);
+  const activeStores = useMemo(() => storesQuery.data?.stores ?? [], [storesQuery.data?.stores]);
 
   return (
     <ThemedView style={styles.screen}>
@@ -29,7 +24,9 @@ export default function SettingsScreen() {
         <ScrollView contentContainerStyle={styles.content} style={styles.scrollView}>
           <View style={styles.header}>
             <ThemedText type="subtitle">Settings</ThemedText>
-            <ThemedText themeColor="textSecondary">Manage the stores used for comparisons.</ThemedText>
+            <ThemedText themeColor="textSecondary">
+              Cartwise compares nearby grocery stores automatically.
+            </ThemedText>
           </View>
 
           <ThemedView type="backgroundElement" style={styles.panel}>
@@ -40,9 +37,9 @@ export default function SettingsScreen() {
           </ThemedView>
 
           <View style={styles.section}>
-            <ThemedText type="smallBold">Selected stores</ThemedText>
-            {selectedStores.length > 0 ? (
-              selectedStores.map((store) => (
+            <ThemedText type="smallBold">Nearby stores</ThemedText>
+            {activeStores.length > 0 ? (
+              activeStores.map((store) => (
                 <ThemedView key={store.id} type="backgroundElement" style={styles.storeRow}>
                   <View style={styles.storeCopy}>
                     <ThemedText type="smallBold">{store.name}</ThemedText>
@@ -60,19 +57,6 @@ export default function SettingsScreen() {
               </ThemedView>
             )}
           </View>
-
-          <Pressable
-            accessibilityRole="button"
-            onPress={resetStores}
-            style={({ pressed }) => [
-              styles.button,
-              { backgroundColor: theme.accent },
-              pressed && styles.pressed,
-            ]}>
-            <ThemedText type="smallBold" style={styles.buttonText}>
-              Use all nearby stores
-            </ThemedText>
-          </Pressable>
 
           <Pressable
             accessibilityRole="button"

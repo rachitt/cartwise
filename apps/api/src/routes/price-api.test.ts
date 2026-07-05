@@ -39,14 +39,14 @@ describe("priceApiPlugin validation", () => {
     expect(response.statusCode).toBe(400);
   });
 
-  it("returns 400 when search has more than sixteen stores", async () => {
+  it("returns 400 when search has more than forty stores", async () => {
     app = Fastify();
     await app.register(priceApiPlugin, {
       db: throwingDb(),
       getCollector: () => null,
     });
     const storeIds = Array.from(
-      { length: 17 },
+      { length: 41 },
       (_, index) => `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
     ).join(",");
 

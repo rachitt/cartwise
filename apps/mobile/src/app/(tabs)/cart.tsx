@@ -14,7 +14,6 @@ import { usePreferencesStore } from '@/state/preferences';
 
 export default function CartScreen() {
   const zip = usePreferencesStore((state) => state.zip);
-  const selectedStoreIds = usePreferencesStore((state) => state.selectedStoreIds);
   const cartQuery = useCurrentCart();
   const storesQuery = useStores(zip);
   const updateCartItem = useUpdateCartItem();
@@ -22,10 +21,8 @@ export default function CartScreen() {
   const createCart = useCreateCart();
   const theme = useTheme();
 
-  const selectedStores = useMemo(() => {
-    const selected = new Set(selectedStoreIds);
-    return (storesQuery.data?.stores ?? []).filter((store) => selected.has(store.id));
-  }, [selectedStoreIds, storesQuery.data?.stores]);
+  const activeStores = useMemo(() => storesQuery.data?.stores ?? [], [storesQuery.data?.stores]);
+  const activeStoreIds = useMemo(() => activeStores.map((store) => store.id), [activeStores]);
 
   const cart = cartQuery.data?.cart;
   const items = cart?.items ?? [];
@@ -34,7 +31,11 @@ export default function CartScreen() {
   const isFinalized = cart?.status === 'finalized';
 
   const handleFinalize = () => {
-    finalizeCart.mutate(selectedStoreIds, {
+    if (activeStoreIds.length === 0) {
+      return;
+    }
+
+    finalizeCart.mutate(activeStoreIds, {
       onSuccess: () => router.push('/cart-results'),
     });
   };
@@ -47,7 +48,7 @@ export default function CartScreen() {
             <View style={styles.headerCopy}>
               <ThemedText type="subtitle">Cart</ThemedText>
               <ThemedText themeColor="textSecondary">
-                {itemCount} {itemCount === 1 ? 'item' : 'items'} across {selectedStores.length} stores
+                {itemCount} {itemCount === 1 ? 'item' : 'items'} across {activeStores.length} stores
               </ThemedText>
             </View>
           </View>
@@ -140,7 +141,9 @@ export default function CartScreen() {
 
           <Pressable
             accessibilityRole="button"
-            disabled={isEmpty || finalizeCart.isPending}
+            disabled={
+              isEmpty || activeStoreIds.length === 0 || storesQuery.isLoading || finalizeCart.isPending
+            }
             onPress={handleFinalize}
             style={({ pressed }) => [
               styles.primaryButton,

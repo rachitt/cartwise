@@ -23,16 +23,17 @@ export default function ProductDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const productId = Array.isArray(id) ? id[0] : id;
   const zip = usePreferencesStore((state) => state.zip);
-  const selectedStoreIds = usePreferencesStore((state) => state.selectedStoreIds);
   const storesQuery = useStores(zip);
-  const productQuery = useProductPrices(productId ?? '', selectedStoreIds);
+  const activeStores = useMemo(() => storesQuery.data?.stores ?? [], [storesQuery.data?.stores]);
+  const activeStoreIds = useMemo(() => activeStores.map((store) => store.id), [activeStores]);
+  const productQuery = useProductPrices(productId ?? '', activeStoreIds);
   const cartQuery = useCurrentCart();
   const updateCartItem = useUpdateCartItem();
   const theme = useTheme();
 
   const storeById = useMemo(
-    () => new Map((storesQuery.data?.stores ?? []).map((store) => [store.id, store])),
-    [storesQuery.data?.stores],
+    () => new Map(activeStores.map((store) => [store.id, store])),
+    [activeStores],
   );
   const cartItem = useMemo(
     () => cartQuery.data?.cart.items.find((item) => item.productId === productId),

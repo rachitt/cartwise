@@ -50,7 +50,7 @@ export default function SearchScreen() {
 
   const canSearch =
     searchText.trim().length >= MIN_SEARCH_LENGTH &&
-    activeStoreIds.length >= 2 &&
+    activeStoreIds.length >= 1 &&
     !storesQuery.isLoading;
   const hasSearch = submittedSearchText.length >= MIN_SEARCH_LENGTH;
   const results = searchQuery.data?.results ?? [];
@@ -70,7 +70,7 @@ export default function SearchScreen() {
   function submitSearch() {
     const trimmed = searchText.trim();
 
-    if (trimmed.length < MIN_SEARCH_LENGTH || activeStoreIds.length < 2) {
+    if (trimmed.length < MIN_SEARCH_LENGTH || activeStoreIds.length < 1) {
       return;
     }
 
@@ -178,9 +178,9 @@ export default function SearchScreen() {
               <ThemedText type="small" themeColor="danger">
                 {storesErrorMessage}
               </ThemedText>
-            ) : activeStores.length < 2 ? (
+            ) : activeStores.length === 0 ? (
               <ThemedText type="small" themeColor="danger">
-                Cartwise needs at least two nearby stores for price comparison.
+                Cartwise could not find supported grocery stores near this ZIP.
               </ThemedText>
             ) : (
               <StatusLine message={`Searching ${activeStores.length} nearby stores in ${zip}.`} />
@@ -211,10 +211,10 @@ export default function SearchScreen() {
               title="Search an item"
               message="Enter one grocery item. Cartwise will show nearby stores and their prices."
             />
-          ) : activeStoreIds.length < 2 ? (
+          ) : activeStoreIds.length === 0 ? (
             <EmptyState
               title="Need nearby stores"
-              message="Change location and try a ZIP with at least two supported grocery stores."
+              message="Change location and try a ZIP with supported grocery stores."
             />
           ) : sortedPricedResults.length === 0 ? (
             <EmptyState
@@ -223,7 +223,7 @@ export default function SearchScreen() {
             />
           ) : (
             <View style={styles.results}>
-              {sortedPricedResults.slice(0, 8).map((result) => {
+              {sortedPricedResults.map((result) => {
                 const size = formatProductSize(result.product.sizeQty, result.product.sizeUnit);
                 const cartItem = cartItemByProductId.get(result.product.id);
                 const qty = cartItem?.qty ?? 0;

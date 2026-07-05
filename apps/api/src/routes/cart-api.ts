@@ -16,6 +16,7 @@ import { upsertWatchesForFinalizedCart } from "../watch-service.js";
 
 const PRODUCTS_TTL_SECONDS = 6 * 60 * 60;
 const STALE_PRICE_MS = 6 * 60 * 60 * 1_000;
+const MAX_FINALIZE_STORE_IDS = 40;
 
 const deviceIdHeaderSchema = z.string().trim().min(1).max(64);
 const itemBodySchema = z.object({
@@ -23,7 +24,7 @@ const itemBodySchema = z.object({
   qty: z.number().int().min(0).max(999),
 });
 const finalizeBodySchema = z.object({
-  storeIds: z.array(z.string().uuid()).min(1).max(8),
+  storeIds: z.array(z.string().uuid()).min(1).max(MAX_FINALIZE_STORE_IDS),
 });
 
 export interface CartApiDeps {
