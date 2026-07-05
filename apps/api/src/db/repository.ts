@@ -214,6 +214,10 @@ export interface CartwiseDb {
   updateWatchBaseline(watchId: string, baselinePrice: number): Promise<void>;
   deactivateWatchForDevice(deviceId: string, watchId: string): Promise<boolean>;
   insertAlert(input: InsertAlertInput): Promise<AlertRow>;
+  insertAlertAndUpdateWatchBaseline(
+    input: InsertAlertInput,
+    baselinePrice: number,
+  ): Promise<AlertRow>;
   markAlertSent(alertId: string, sentAt: Date): Promise<void>;
   listAlertsForDevice(deviceId: string): Promise<AlertWithDetails[]>;
   markAlertReadForDevice(deviceId: string, alertId: string): Promise<boolean>;
@@ -569,6 +573,17 @@ class DrizzleCartwiseDb implements CartwiseDb {
   async insertAlert(input: InsertAlertInput): Promise<AlertRow> {
     const [row] = await drizzleDb.insert(alerts).values(input).returning();
     return row as AlertRow;
+  }
+
+  async insertAlertAndUpdateWatchBaseline(
+    input: InsertAlertInput,
+    baselinePrice: number,
+  ): Promise<AlertRow> {
+    return drizzleDb.transaction(async (tx) => {
+      const [row] = await tx.insert(alerts).values(input).returning();
+      await tx.update(watches).set({ baselinePrice }).where(eq(watches.id, input.watchId));
+      return row as AlertRow;
+    });
   }
 
   async markAlertSent(alertId: string, sentAt: Date): Promise<void> {

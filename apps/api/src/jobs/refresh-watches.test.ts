@@ -1,9 +1,10 @@
 import type { ChainSlug } from "@cartwise/shared";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { CollectedProduct, Collector } from "../collectors/types.js";
 import type {
   AlertRow,
+  AlertWithDetails,
   LatestProductStorePriceRow,
   PriceSnapshotRow,
   ProductRow,
@@ -12,6 +13,8 @@ import type {
   WatchWithProduct,
 } from "../db/repository.js";
 import { isPriceDrop, refreshWatches } from "./refresh-watches.js";
+
+type SendPush = NonNullable<Parameters<typeof refreshWatches>[0]["sendPush"]>;
 
 const storeOneId = "10000000-0000-4000-8000-000000000001";
 const storeTwoId = "10000000-0000-4000-8000-000000000002";
@@ -40,6 +43,117 @@ describe("refreshWatches", () => {
 
     expect(result).toMatchObject({ checked: 1, alerts: 1, errors: [] });
     expect(db.alerts).toMatchObject([{ watchId: "watch-1", oldPrice: 10, newPrice: 8.99 }]);
+    expect(db.watches[0]?.baselinePrice).toBe(8.99);
+  });
+
+  it("retries an unsent alert after a push failure on the next run", async () => {
+    const db = new FakeRefreshDb();
+    db.addWatch({ id: "watch-1", productId: productOneId, storeIds: [storeOneId], baselinePrice: 10 });
+    db.setPushToken("device-watch-1", "ExponentPushToken[watch-1]");
+    db.setLatestPrice(productOneId, storeOneId, 10);
+    const collector = new FakeCollector();
+    collector.setPrice(productOneId, storeOneId, 8.99);
+    const sendPush = vi
+      .fn<SendPush>()
+      .mockRejectedValueOnce(new Error("push failed"))
+      .mockResolvedValue(undefined);
+
+    const firstResult = await refreshWatches({
+      db: db.asDb(),
+      getCollector: () => collector,
+      cache: uncached(),
+      sendPush,
+      now: () => new Date("2026-07-04T14:00:00Z"),
+    });
+    const secondResult = await refreshWatches({
+      db: db.asDb(),
+      getCollector: () => collector,
+      cache: uncached(),
+      sendPush,
+      now: () => new Date("2026-07-05T14:00:00Z"),
+    });
+
+    expect(firstResult).toMatchObject({
+      checked: 1,
+      alerts: 1,
+      errors: [{ watchId: "watch-1", message: "push failed" }],
+    });
+    expect(secondResult).toMatchObject({ checked: 1, alerts: 0, errors: [] });
+    expect(sendPush).toHaveBeenCalledTimes(2);
+    expect(db.alerts).toHaveLength(1);
+    expect(db.alerts[0]?.sentAt).toEqual(new Date("2026-07-05T14:00:00Z"));
+    expect(db.watches[0]?.baselinePrice).toBe(8.99);
+  });
+
+  it("sends exactly one push for a successful drop even if the price oscillates", async () => {
+    const db = new FakeRefreshDb();
+    db.addWatch({ id: "watch-1", productId: productOneId, storeIds: [storeOneId], baselinePrice: 10 });
+    db.setPushToken("device-watch-1", "ExponentPushToken[watch-1]");
+    db.setLatestPrice(productOneId, storeOneId, 10);
+    const collector = new FakeCollector();
+    collector.setPrice(productOneId, storeOneId, 8.99);
+    const sendPush = vi.fn<SendPush>().mockResolvedValue(undefined);
+
+    const firstResult = await refreshWatches({
+      db: db.asDb(),
+      getCollector: () => collector,
+      cache: uncached(),
+      sendPush,
+    });
+    collector.setPrice(productOneId, storeOneId, 10);
+    const secondResult = await refreshWatches({
+      db: db.asDb(),
+      getCollector: () => collector,
+      cache: uncached(),
+      sendPush,
+    });
+    collector.setPrice(productOneId, storeOneId, 8.99);
+    const thirdResult = await refreshWatches({
+      db: db.asDb(),
+      getCollector: () => collector,
+      cache: uncached(),
+      sendPush,
+    });
+
+    expect(firstResult).toMatchObject({ checked: 1, alerts: 1, errors: [] });
+    expect(secondResult).toMatchObject({ checked: 1, alerts: 0, errors: [] });
+    expect(thirdResult).toMatchObject({ checked: 1, alerts: 0, errors: [] });
+    expect(sendPush).toHaveBeenCalledTimes(1);
+    expect(db.alerts).toHaveLength(1);
+  });
+
+  it("does not persist a duplicate alert when the baseline update fails", async () => {
+    const db = new FakeRefreshDb();
+    db.addWatch({ id: "watch-1", productId: productOneId, storeIds: [storeOneId], baselinePrice: 10 });
+    db.setPushToken("device-watch-1", "ExponentPushToken[watch-1]");
+    db.failNextBaselineUpdate("watch-1");
+    db.setLatestPrice(productOneId, storeOneId, 10);
+    const collector = new FakeCollector();
+    collector.setPrice(productOneId, storeOneId, 8.99);
+    const sendPush = vi.fn<SendPush>().mockResolvedValue(undefined);
+
+    const firstResult = await refreshWatches({
+      db: db.asDb(),
+      getCollector: () => collector,
+      cache: uncached(),
+      sendPush,
+    });
+    const secondResult = await refreshWatches({
+      db: db.asDb(),
+      getCollector: () => collector,
+      cache: uncached(),
+      sendPush,
+    });
+
+    expect(firstResult).toMatchObject({
+      checked: 1,
+      alerts: 0,
+      errors: [{ watchId: "watch-1", message: "baseline update failed" }],
+    });
+    expect(secondResult).toMatchObject({ checked: 1, alerts: 1, errors: [] });
+    expect(sendPush).toHaveBeenCalledTimes(1);
+    expect(db.alerts).toHaveLength(1);
+    expect(db.alerts[0]).toMatchObject({ watchId: "watch-1", oldPrice: 10, newPrice: 8.99 });
     expect(db.watches[0]?.baselinePrice).toBe(8.99);
   });
 
@@ -72,6 +186,8 @@ class FakeRefreshDb {
   watches: WatchWithProduct[] = [];
   alerts: AlertRow[] = [];
   private rows = new Map<string, LatestProductStorePriceRow>();
+  private pushTokens = new Map<string, PushTokenRow>();
+  private failingBaselineUpdates = new Set<string>();
   private stores = new Map<string, StoreRow>([
     [storeOneId, store(storeOneId, "A Market")],
     [storeTwoId, store(storeTwoId, "B Market")],
@@ -97,6 +213,19 @@ class FakeRefreshDb {
       createdAt: new Date("2026-07-04T12:00:00Z"),
       product: product(input.productId, `Product ${input.productId.slice(-1)}`),
     });
+  }
+
+  setPushToken(deviceId: string, expoPushToken: string): void {
+    this.pushTokens.set(deviceId, {
+      id: `push-token-${deviceId}`,
+      deviceId,
+      expoPushToken,
+      updatedAt: new Date("2026-07-04T12:00:00Z"),
+    });
+  }
+
+  failNextBaselineUpdate(watchId: string): void {
+    this.failingBaselineUpdates.add(watchId);
   }
 
   setLatestPrice(productId: string, storeId: string, price: number): void {
@@ -177,19 +306,76 @@ class FakeRefreshDb {
     return alert;
   }
 
+  async insertAlertAndUpdateWatchBaseline(
+    input: {
+      watchId: string;
+      storeId: string;
+      oldPrice: number;
+      newPrice: number;
+      capturedAt: Date;
+    },
+    baselinePrice: number,
+  ): Promise<AlertRow> {
+    if (this.failingBaselineUpdates.delete(input.watchId)) {
+      throw new Error("baseline update failed");
+    }
+
+    const alert: AlertRow = {
+      id: `alert-${this.alerts.length + 1}`,
+      sentAt: null,
+      read: false,
+      ...input,
+    };
+    const watch = this.watches.find((candidate) => candidate.id === input.watchId);
+    if (watch) {
+      watch.baselinePrice = baselinePrice;
+    }
+
+    this.alerts.push(alert);
+    return alert;
+  }
+
   async updateWatchBaseline(watchId: string, baselinePrice: number): Promise<void> {
+    if (this.failingBaselineUpdates.delete(watchId)) {
+      throw new Error("baseline update failed");
+    }
+
     const watch = this.watches.find((candidate) => candidate.id === watchId);
     if (watch) {
       watch.baselinePrice = baselinePrice;
     }
   }
 
-  async getPushTokenForDevice(): Promise<PushTokenRow | null> {
-    return null;
+  async getPushTokenForDevice(deviceId: string): Promise<PushTokenRow | null> {
+    return this.pushTokens.get(deviceId) ?? null;
   }
 
-  async markAlertSent(): Promise<void> {
-    throw new Error("not implemented");
+  async listAlertsForDevice(deviceId: string): Promise<AlertWithDetails[]> {
+    const rows: AlertWithDetails[] = [];
+    for (const alert of this.alerts) {
+      const watch = this.watches.find((candidate) => candidate.id === alert.watchId);
+      const storeRow = this.stores.get(alert.storeId);
+      if (!watch || !storeRow || watch.deviceId !== deviceId) {
+        continue;
+      }
+
+      const { product: watchProduct, ...watchRow } = watch;
+      rows.push({
+        ...alert,
+        watch: watchRow,
+        product: watchProduct,
+        store: storeRow,
+      });
+    }
+
+    return rows;
+  }
+
+  async markAlertSent(alertId: string, sentAt: Date): Promise<void> {
+    const alert = this.alerts.find((candidate) => candidate.id === alertId);
+    if (alert) {
+      alert.sentAt = sentAt;
+    }
   }
 }
 

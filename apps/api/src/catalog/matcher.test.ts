@@ -236,6 +236,10 @@ class FakeCatalogDb implements CartwiseDb {
     throw new Error("not implemented");
   }
 
+  async insertAlertAndUpdateWatchBaseline(): Promise<AlertRow> {
+    throw new Error("not implemented");
+  }
+
   async markAlertSent(): Promise<void> {
     throw new Error("not implemented");
   }

@@ -2,7 +2,12 @@ import type { ChainSlug } from "@cartwise/shared";
 
 import { createCache, type Cache } from "../cache.js";
 import type { CollectedProduct, Collector } from "../collectors/types.js";
-import type { CartwiseDb, LatestProductStorePriceRow, WatchWithProduct } from "../db/repository.js";
+import type {
+  AlertWithDetails,
+  CartwiseDb,
+  LatestProductStorePriceRow,
+  WatchWithProduct,
+} from "../db/repository.js";
 import { sendPriceDropPush, type PriceDropPushInfo } from "../push.js";
 
 const PRICES_TTL_SECONDS = 6 * 60 * 60;
@@ -37,6 +42,8 @@ export async function refreshWatches(deps: RefreshWatchesDeps): Promise<RefreshW
   const watches = await deps.db.getActiveWatches();
   const rowsToRefresh: RefreshRow[] = [];
 
+  await retryUnsentAlerts(deps.db, watches, sendPush, now, errors, deps.logger);
+
   for (const watch of watches) {
     try {
       const rows = await deps.db.getLatestPricesForProducts([watch.productId], watch.storeIds);
@@ -59,14 +66,22 @@ export async function refreshWatches(deps: RefreshWatchesDeps): Promise<RefreshW
 
       const oldPrice = watch.baselinePrice;
       const newPrice = effectivePrice(best.price);
-      const alert = await deps.db.insertAlert({
-        watchId: watch.id,
-        storeId: best.storeId,
-        oldPrice,
+      const existingAlert = await findAlertForDrop(deps.db, watch, newPrice);
+      if (existingAlert) {
+        await deps.db.updateWatchBaseline(watch.id, newPrice);
+        continue;
+      }
+
+      const alert = await deps.db.insertAlertAndUpdateWatchBaseline(
+        {
+          watchId: watch.id,
+          storeId: best.storeId,
+          oldPrice,
+          newPrice,
+          capturedAt: best.price.capturedAt,
+        },
         newPrice,
-        capturedAt: best.price.capturedAt,
-      });
-      await deps.db.updateWatchBaseline(watch.id, newPrice);
+      );
       alertCount += 1;
 
       const pushToken = await deps.db.getPushTokenForDevice(watch.deviceId);
@@ -87,6 +102,63 @@ export async function refreshWatches(deps: RefreshWatchesDeps): Promise<RefreshW
   }
 
   return { checked: watches.length, alerts: alertCount, errors };
+}
+
+async function retryUnsentAlerts(
+  db: CartwiseDb,
+  watches: WatchWithProduct[],
+  sendPush: (token: string, alertInfo: PriceDropPushInfo) => Promise<void>,
+  now: () => Date,
+  errors: RefreshWatchesResult["errors"],
+  logger: RefreshWatchesDeps["logger"],
+): Promise<void> {
+  for (const watch of watches) {
+    try {
+      const watchAlerts = (await db.listAlertsForDevice(watch.deviceId)).filter(
+        (alert) => alert.watchId === watch.id,
+      );
+      const sentDropKeys = new Set(
+        watchAlerts.filter((alert) => alert.sentAt).map((alert) => alertDropKey(alert)),
+      );
+      const unsentAlerts = watchAlerts
+        .filter((alert) => !alert.sentAt)
+        .sort((left, right) => left.capturedAt.getTime() - right.capturedAt.getTime());
+      if (unsentAlerts.length === 0) {
+        continue;
+      }
+
+      const pushToken = await db.getPushTokenForDevice(watch.deviceId);
+
+      for (const alert of unsentAlerts) {
+        const dropKey = alertDropKey(alert);
+        if (!sentDropKeys.has(dropKey)) {
+          if (!pushToken) {
+            continue;
+          }
+
+          await sendPush(pushToken.expoPushToken, alertToPushInfo(alert));
+          sentDropKeys.add(dropKey);
+        }
+
+        await db.markAlertSent(alert.id, now());
+      }
+    } catch (error) {
+      recordWatchError(errors, logger, watch.id, error);
+    }
+  }
+}
+
+async function findAlertForDrop(
+  db: CartwiseDb,
+  watch: WatchWithProduct,
+  newPrice: number,
+): Promise<AlertWithDetails | null> {
+  const newPriceCents = moneyToCents(newPrice);
+  return (
+    (await db.listAlertsForDevice(watch.deviceId)).find(
+      (alert) => alert.watchId === watch.id && moneyToCents(alert.newPrice) === newPriceCents,
+    ) ?? null
+  );
 }
 
 async function refreshLatestPrices(
@@ -192,6 +264,19 @@ export function isPriceDrop(baselinePrice: number, newPrice: number): boolean {
 
 function effectivePrice(price: { price: number; promoPrice: number | null }): number {
   return price.promoPrice ?? price.price;
+}
+
+function alertToPushInfo(alert: AlertWithDetails): PriceDropPushInfo {
+  return {
+    product: alert.product.name,
+    store: alert.store.name,
+    oldPrice: alert.oldPrice,
+    newPrice: alert.newPrice,
+  };
+}
+
+function alertDropKey(alert: Pick<AlertWithDetails, "watchId" | "newPrice">): string {
+  return `${alert.watchId}:${moneyToCents(alert.newPrice)}`;
 }
 
 function moneyToCents(value: number): number {
