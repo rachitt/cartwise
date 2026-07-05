@@ -13,6 +13,7 @@ import {
   useUpdateCartItem,
 } from '@/api/queries';
 import { CartQuantityStepper } from '@/components/cart/cart-quantity-stepper';
+import { ProductThumb } from '@/components/ui/product-thumb';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { AppButton } from '@/components/ui/button';
@@ -182,6 +183,7 @@ function CartItemRow({
         showSeparator && styles.rowSeparator,
         showSeparator && { borderBottomColor: theme.border },
       ]}>
+      <ProductThumb imageUrl={item.product.imageUrl} name={item.product.name} size={44} />
       <View style={styles.itemCopy}>
         <ThemedText type="smallBold" numberOfLines={2}>
           {item.product.name}

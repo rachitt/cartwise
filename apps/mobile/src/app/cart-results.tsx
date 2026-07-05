@@ -22,6 +22,7 @@ import { Chip } from '@/components/ui/chip';
 import { EmptyState } from '@/components/ui/empty-state';
 import { FreshnessStamp } from '@/components/ui/freshness-stamp';
 import { PriceText } from '@/components/ui/price-text';
+import { ProductThumb } from '@/components/ui/product-thumb';
 import { ReceiptRow } from '@/components/ui/receipt-row';
 import { Skeleton } from '@/components/ui/skeleton';
 import { MaxContentWidth, Motion, Radii, Spacing } from '@/constants/theme';
@@ -312,6 +313,7 @@ function CartItemResultRow({
         showSeparator && styles.rowSeparator,
         showSeparator && { borderBottomColor: theme.border },
       ]}>
+      <ProductThumb imageUrl={item.product.imageUrl} name={item.product.name} size={40} />
       <View style={styles.cartItemCopy}>
         <ThemedText type="smallBold" numberOfLines={2}>
           {item.product.name}
