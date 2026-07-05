@@ -12,7 +12,7 @@ import { ThemedText } from './themed-text';
 import { ThemedView } from './themed-view';
 
 import { useCurrentCart } from '@/api/queries';
-import { MaxContentWidth, Spacing } from '@/constants/theme';
+import { FontFamilies, MaxContentWidth, Spacing } from '@/constants/theme';
 
 export default function AppTabs() {
   const cartQuery = useCurrentCart();
@@ -51,14 +51,14 @@ export function TabButton({
   return (
     <Pressable {...props} style={({ pressed }) => pressed && styles.pressed}>
       <ThemedView
-        type={isFocused ? 'backgroundSelected' : 'backgroundElement'}
+        type={isFocused ? 'accentMuted' : 'backgroundElement'}
         style={styles.tabButtonView}>
-        <ThemedText type="small" themeColor={isFocused ? 'text' : 'textSecondary'}>
+        <ThemedText type="small" themeColor={isFocused ? 'accent' : 'textSecondary'}>
           {children}
         </ThemedText>
         {badge > 0 ? (
           <ThemedView type="accent" style={styles.badge}>
-            <ThemedText type="smallBold" style={styles.badgeText}>
+            <ThemedText type="smallBold" themeColor="onAccent" style={styles.badgeText}>
               {badge}
             </ThemedText>
           </ThemedView>
@@ -108,6 +108,7 @@ const styles = StyleSheet.create({
     maxWidth: MaxContentWidth,
   },
   brandText: {
+    fontFamily: FontFamilies.displayBold,
     marginRight: 'auto',
   },
   pressed: {
@@ -130,7 +131,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.one,
   },
   badgeText: {
-    color: '#ffffff',
     lineHeight: 18,
   },
 });

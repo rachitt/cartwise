@@ -1,9 +1,8 @@
 import { Tabs } from 'expo-router';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
-import { useColorScheme } from 'react-native';
 
 import { useCurrentCart } from '@/api/queries';
-import { Colors } from '@/constants/theme';
+import { useTheme } from '@/hooks/use-theme';
 
 const icons: Record<string, SymbolViewProps['name']> = {
   index: { ios: 'magnifyingglass', android: 'search', web: 'search' },
@@ -13,8 +12,7 @@ const icons: Record<string, SymbolViewProps['name']> = {
 };
 
 export default function AppTabs() {
-  const scheme = useColorScheme();
-  const colors = Colors[scheme === 'unspecified' ? 'light' : scheme];
+  const colors = useTheme();
   const cartQuery = useCurrentCart();
   const cartItemCount =
     cartQuery.data?.cart.items.reduce((sum, item) => sum + item.qty, 0) ?? 0;
@@ -26,8 +24,12 @@ export default function AppTabs() {
         tabBarActiveTintColor: colors.accent,
         tabBarInactiveTintColor: colors.textSecondary,
         tabBarStyle: {
-          backgroundColor: colors.background,
+          backgroundColor: colors.backgroundElement,
           borderTopColor: colors.border,
+        },
+        tabBarBadgeStyle: {
+          backgroundColor: colors.accent,
+          color: colors.onAccent,
         },
         tabBarIcon: ({ color, size }) => (
           <SymbolView name={icons[route.name]} tintColor={color} size={size} />
