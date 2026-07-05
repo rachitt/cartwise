@@ -1,19 +1,6 @@
 import type { CartOptimization, Product, Store, StorePrice } from '@cartwise/shared';
 import Constants from 'expo-constants';
 
-import {
-  createMockCart,
-  finalizeMockCart,
-  getMockAlerts,
-  getMockCurrentCart,
-  getMockProductPrices,
-  getMockStores,
-  markMockAlertRead,
-  registerMockPushToken,
-  removeMockWatch,
-  searchMockProducts,
-  updateMockCartItem,
-} from '@/api/mocks';
 import { getDeviceId } from '@/lib/device-id';
 
 export type StoresResponse = { stores: Store[] };
@@ -45,7 +32,6 @@ export type PushTokenResponse = { ok: true };
 
 const DEV_API_FALLBACK_URL = 'http://localhost:3000';
 const API_URL = resolveApiUrl();
-const USE_MOCKS = __DEV__ && process.env.EXPO_PUBLIC_USE_MOCKS === '1';
 const REQUEST_TIMEOUT_MS = 25000;
 
 type RequestJsonOptions = {
@@ -96,15 +82,7 @@ function formatHostForUrl(host: string) {
   return host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
 }
 
-async function requestJson<T>(
-  path: string,
-  fallback: () => T | Promise<T>,
-  options: RequestJsonOptions = {},
-): Promise<T> {
-  if (USE_MOCKS) {
-    return fallback();
-  }
-
+async function requestJson<T>(path: string, options: RequestJsonOptions = {}): Promise<T> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
@@ -132,68 +110,52 @@ async function requestJson<T>(
   }
 }
 
-export function isUsingMocks() {
-  return USE_MOCKS;
-}
-
 export function getStores(zip: string) {
   const params = new URLSearchParams({ zip });
-  return requestJson<StoresResponse>(`/stores?${params.toString()}`, getMockStores);
+  return requestJson<StoresResponse>(`/stores?${params.toString()}`);
 }
 
 export function searchProducts(query: string, storeIds: string[]) {
   const params = new URLSearchParams({ q: query, storeIds: toStoreIdsParam(storeIds) });
-  return requestJson<SearchResponse>(`/search?${params.toString()}`, () =>
-    searchMockProducts(query, storeIds),
-  );
+  return requestJson<SearchResponse>(`/search?${params.toString()}`);
 }
 
 export function getProductPrices(productId: string, storeIds: string[]) {
   const params = new URLSearchParams({ storeIds: toStoreIdsParam(storeIds) });
-  return requestJson<ProductPricesResponse>(`/products/${productId}/prices?${params.toString()}`, () =>
-    getMockProductPrices(productId, storeIds),
-  );
+  return requestJson<ProductPricesResponse>(`/products/${productId}/prices?${params.toString()}`);
 }
 
 export function createCart() {
-  return requestJson<CartResponse>('/carts', createMockCart, {
+  return requestJson<CartResponse>('/carts', {
     method: 'POST',
     requiresDeviceId: true,
   });
 }
 
 export function getCurrentCart() {
-  return requestJson<CartResponse>('/carts/current', getMockCurrentCart, {
+  return requestJson<CartResponse>('/carts/current', {
     requiresDeviceId: true,
   });
 }
 
 export function updateCartItem(productId: string, qty: number) {
-  return requestJson<CartResponse>(
-    '/carts/current/items',
-    () => updateMockCartItem(productId, qty),
-    {
-      method: 'PUT',
-      body: { productId, qty },
-      requiresDeviceId: true,
-    },
-  );
+  return requestJson<CartResponse>('/carts/current/items', {
+    method: 'PUT',
+    body: { productId, qty },
+    requiresDeviceId: true,
+  });
 }
 
 export function finalizeCart(storeIds: string[]) {
-  return requestJson<CartOptimization>(
-    '/carts/current/finalize',
-    () => finalizeMockCart(storeIds),
-    {
-      method: 'POST',
-      body: { storeIds },
-      requiresDeviceId: true,
-    },
-  );
+  return requestJson<CartOptimization>('/carts/current/finalize', {
+    method: 'POST',
+    body: { storeIds },
+    requiresDeviceId: true,
+  });
 }
 
 export function registerPushToken(expoPushToken: string) {
-  return requestJson<PushTokenResponse>('/push-tokens', registerMockPushToken, {
+  return requestJson<PushTokenResponse>('/push-tokens', {
     method: 'POST',
     body: { expoPushToken },
     requiresDeviceId: true,
@@ -201,20 +163,20 @@ export function registerPushToken(expoPushToken: string) {
 }
 
 export function getAlerts() {
-  return requestJson<AlertsResponse>('/alerts', getMockAlerts, {
+  return requestJson<AlertsResponse>('/alerts', {
     requiresDeviceId: true,
   });
 }
 
 export function markAlertRead(alertId: string) {
-  return requestJson<PriceAlert>(`/alerts/${alertId}/read`, () => markMockAlertRead(alertId), {
+  return requestJson<PriceAlert>(`/alerts/${alertId}/read`, {
     method: 'PUT',
     requiresDeviceId: true,
   });
 }
 
 export function removeWatch(watchId: string) {
-  return requestJson<PushTokenResponse>(`/watches/${watchId}`, () => removeMockWatch(watchId), {
+  return requestJson<PushTokenResponse>(`/watches/${watchId}`, {
     method: 'DELETE',
     requiresDeviceId: true,
   });
