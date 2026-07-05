@@ -1,0 +1,7 @@
+services:
+  postgres:
+    # Replace (not append to) the base port list so we don't also try to bind
+    # host 5432, which is already taken by a local Postgres. The dev probe
+    # ladder checks 5433 first, so the container lands on the expected port.
+    ports: !override
+      - "5433:5432"
