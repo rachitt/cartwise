@@ -1,16 +1,41 @@
 import { router } from 'expo-router';
+import type { SymbolViewProps } from 'expo-symbols';
 import { useMemo } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { useCreateCart, useCurrentCart, useFinalizeCart, useStores, useUpdateCartItem } from '@/api/queries';
-import { CartQuantityStepper } from '@/components/cart-quantity-stepper';
+import type { CartItem } from '@/api/client';
+import {
+  useCreateCart,
+  useCurrentCart,
+  useFinalizeCart,
+  useStores,
+  useUpdateCartItem,
+} from '@/api/queries';
+import { CartQuantityStepper } from '@/components/cart/cart-quantity-stepper';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { AppButton } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Chip } from '@/components/ui/chip';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Skeleton } from '@/components/ui/skeleton';
+import { BottomTabInset, MaxContentWidth, Radii, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { formatProductSize } from '@/lib/price';
 import { usePreferencesStore } from '@/state/preferences';
+
+const WARNING_ICON = {
+  ios: 'exclamationmark.triangle',
+  android: 'warning',
+  web: 'warning',
+} satisfies SymbolViewProps['name'];
+
+const CART_ICON = {
+  ios: 'cart',
+  android: 'shopping_cart',
+  web: 'shopping_cart',
+} satisfies SymbolViewProps['name'];
 
 export default function CartScreen() {
   const zip = usePreferencesStore((state) => state.zip);
@@ -29,6 +54,8 @@ export default function CartScreen() {
   const itemCount = items.reduce((sum, item) => sum + item.qty, 0);
   const isEmpty = itemCount === 0;
   const isFinalized = cart?.status === 'finalized';
+  const finalizeDisabled =
+    isEmpty || activeStoreIds.length === 0 || storesQuery.isLoading || finalizeCart.isPending;
 
   const handleFinalize = () => {
     if (activeStoreIds.length === 0) {
@@ -45,139 +72,167 @@ export default function CartScreen() {
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         <ScrollView contentContainerStyle={styles.content} style={styles.scrollView}>
           <View style={styles.header}>
-            <View style={styles.headerCopy}>
-              <ThemedText type="subtitle">Cart</ThemedText>
-              <ThemedText themeColor="textSecondary">
-                {itemCount} {itemCount === 1 ? 'item' : 'items'} across {activeStores.length} stores
-              </ThemedText>
-            </View>
+            <ThemedText type="eyebrow">CARTWISE</ThemedText>
+            <ThemedText type="display">Cart</ThemedText>
+            <ThemedText type="small" themeColor="textSecondary">
+              {formatCount(itemCount, 'item')} · compared across{' '}
+              {formatCount(activeStores.length, 'store')}
+            </ThemedText>
           </View>
 
           {isFinalized ? (
-            <ThemedView type="accentMuted" style={styles.finalizedBanner}>
+            <Card
+              style={[
+                styles.finalizedBanner,
+                { backgroundColor: theme.accentMuted, borderColor: theme.accentMuted },
+              ]}>
               <View style={styles.bannerCopy}>
-                <ThemedText type="smallBold" themeColor="accent">
-                  Finalized
-                </ThemedText>
+                <Chip label="Finalized" tone="accent" />
                 <ThemedText type="small" themeColor="textSecondary">
-                  Start a new cart when you are ready to compare another trip.
+                  Prices locked for this run.
                 </ThemedText>
               </View>
-              <Pressable
-                accessibilityRole="button"
-                disabled={createCart.isPending}
+              <AppButton
+                label="Start a new cart"
+                variant="secondary"
+                loading={createCart.isPending}
                 onPress={() => createCart.mutate()}
-                style={({ pressed }) => [
-                  styles.secondaryButton,
-                  { borderColor: theme.accent },
-                  pressed && styles.pressed,
-                  createCart.isPending && styles.disabled,
-                ]}>
-                <ThemedText type="smallBold" themeColor="accent">
-                  Start new
-                </ThemedText>
-              </Pressable>
-            </ThemedView>
+                style={styles.bannerButton}
+              />
+            </Card>
           ) : null}
 
           {cartQuery.isLoading ? (
-            <LoadingState />
+            <CartSkeleton />
           ) : cartQuery.isError ? (
-            <MessageState title="Could not load cart" message="Pull prices again or try reopening Cartwise." />
+            <EmptyState
+              icon={WARNING_ICON}
+              title="Could not load cart"
+              message="Pull prices again or try reopening Cartwise."
+            />
           ) : isEmpty ? (
-            <MessageState title="Your cart is empty" message="Add groceries from search to compare a full basket." />
+            <EmptyState
+              icon={CART_ICON}
+              title="Your cart is empty"
+              message="Add items from Search to compare store totals."
+            />
           ) : (
-            <View style={styles.itemList}>
-              {items.map((item) => {
-                const size = formatProductSize(item.product.sizeQty, item.product.sizeUnit);
-
-                return (
-                  <ThemedView key={item.productId} type="backgroundElement" style={styles.itemRow}>
-                    <View style={styles.itemCopy}>
-                      <ThemedText type="smallBold">{item.product.name}</ThemedText>
-                      <ThemedText type="small" themeColor="textSecondary">
-                        {[item.product.brand, size].filter(Boolean).join(' · ')}
-                      </ThemedText>
-                    </View>
-                    <View style={styles.itemActions}>
-                      <CartQuantityStepper
-                        compact
-                        qty={item.qty}
-                        disabled={updateCartItem.isPending}
-                        onChange={(qty) => updateCartItem.mutate({ productId: item.productId, qty })}
-                      />
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel={`Remove ${item.product.name}`}
-                        disabled={updateCartItem.isPending}
-                        hitSlop={8}
-                        onPress={() => updateCartItem.mutate({ productId: item.productId, qty: 0 })}
-                        style={({ pressed }) => [
-                          styles.removeButton,
-                          pressed && styles.pressed,
-                          updateCartItem.isPending && styles.disabled,
-                        ]}>
-                        <ThemedText type="smallBold" themeColor="danger">
-                          Remove
-                        </ThemedText>
-                      </Pressable>
-                    </View>
-                  </ThemedView>
-                );
-              })}
-            </View>
+            <Card flush>
+              {items.map((item, index) => (
+                <CartItemRow
+                  key={item.productId}
+                  disabled={updateCartItem.isPending}
+                  item={item}
+                  showSeparator={index < items.length - 1}
+                  onQtyChange={(qty) => updateCartItem.mutate({ productId: item.productId, qty })}
+                  onRemove={() => updateCartItem.mutate({ productId: item.productId, qty: 0 })}
+                />
+              ))}
+            </Card>
           )}
 
           {finalizeCart.isError ? (
-            <ThemedView type="backgroundElement" style={styles.errorPanel}>
-              <ThemedText type="smallBold" themeColor="danger">
-                Could not finalize cart
+            <Card
+              style={[
+                styles.finalizeError,
+                { backgroundColor: theme.dangerMuted, borderColor: theme.dangerMuted },
+              ]}>
+              <ThemedText type="small" themeColor="danger">
+                Could not finalize cart. Check your connection and try again.
               </ThemedText>
-              <ThemedText type="small" themeColor="textSecondary">
-                Check your connection and try again.
-              </ThemedText>
-            </ThemedView>
+            </Card>
           ) : null}
 
-          <Pressable
-            accessibilityRole="button"
-            disabled={
-              isEmpty || activeStoreIds.length === 0 || storesQuery.isLoading || finalizeCart.isPending
-            }
+          <AppButton
+            label="Find my cheapest store"
+            size="lg"
+            haptic="success"
+            loading={finalizeCart.isPending}
+            disabled={finalizeDisabled}
             onPress={handleFinalize}
-            style={({ pressed }) => [
-              styles.primaryButton,
-              { backgroundColor: isEmpty ? theme.backgroundSelected : theme.accent },
-              pressed && styles.pressed,
-              (isEmpty || finalizeCart.isPending) && styles.disabled,
-            ]}>
-            <ThemedText type="smallBold" style={styles.primaryButtonText}>
-              {finalizeCart.isPending ? 'Finding cheapest store...' : 'Find my cheapest store'}
-            </ThemedText>
-          </Pressable>
+            style={styles.footerButton}
+          />
         </ScrollView>
       </SafeAreaView>
     </ThemedView>
   );
 }
 
-function LoadingState() {
+function CartItemRow({
+  disabled,
+  item,
+  showSeparator,
+  onQtyChange,
+  onRemove,
+}: {
+  disabled: boolean;
+  item: CartItem;
+  showSeparator: boolean;
+  onQtyChange: (qty: number) => void;
+  onRemove: () => void;
+}) {
+  const theme = useTheme();
+  const size = formatProductSize(item.product.sizeQty, item.product.sizeUnit);
+  const meta = [item.product.brand, size].filter(Boolean).join(' · ');
+
   return (
-    <ThemedView type="backgroundElement" style={styles.messageState}>
-      <ActivityIndicator color="#16a34a" />
-    </ThemedView>
+    <View
+      style={[
+        styles.itemRow,
+        showSeparator && styles.rowSeparator,
+        showSeparator && { borderBottomColor: theme.border },
+      ]}>
+      <View style={styles.itemCopy}>
+        <ThemedText type="smallBold" numberOfLines={2}>
+          {item.product.name}
+        </ThemedText>
+        {meta ? (
+          <ThemedText type="caption" themeColor="textSecondary" numberOfLines={1}>
+            {meta}
+          </ThemedText>
+        ) : null}
+      </View>
+      <View style={styles.itemActions}>
+        <CartQuantityStepper qty={item.qty} disabled={disabled} onChange={onQtyChange} />
+        <AppButton
+          label="Remove"
+          variant="ghost"
+          disabled={disabled}
+          onPress={onRemove}
+          style={styles.removeButton}
+        />
+      </View>
+    </View>
   );
 }
 
-function MessageState({ title, message }: { title: string; message: string }) {
+function CartSkeleton() {
+  const theme = useTheme();
+
   return (
-    <ThemedView type="backgroundElement" style={styles.messageState}>
-      <ThemedText type="smallBold">{title}</ThemedText>
-      <ThemedText type="small" themeColor="textSecondary" style={styles.messageText}>
-        {message}
-      </ThemedText>
-    </ThemedView>
+    <Card flush>
+      {[0, 1, 2].map((item, index) => (
+        <View
+          key={item}
+          style={[
+            styles.skeletonRow,
+            index < 2 && styles.rowSeparator,
+            index < 2 && styles.skeletonSeparator,
+            index < 2 && { borderBottomColor: theme.border },
+          ]}>
+          <View style={styles.skeletonCopy}>
+            <Skeleton height={16} width="74%" />
+            <Skeleton height={12} width="52%" />
+          </View>
+          <Skeleton height={44} width={132} radius={Radii.control} />
+        </View>
+      ))}
+    </Card>
   );
+}
+
+function formatCount(count: number, singular: string) {
+  return `${count} ${singular}${count === 1 ? '' : 's'}`;
 }
 
 const styles = StyleSheet.create({
@@ -201,45 +256,36 @@ const styles = StyleSheet.create({
     gap: Spacing.three,
   },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.three,
-  },
-  headerCopy: {
-    flex: 1,
     gap: Spacing.one,
   },
   finalizedBanner: {
-    borderRadius: 8,
-    padding: Spacing.three,
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
     gap: Spacing.three,
   },
   bannerCopy: {
     flex: 1,
-    gap: Spacing.one,
+    minWidth: 160,
+    gap: Spacing.two,
   },
-  secondaryButton: {
-    minHeight: 40,
-    borderRadius: 8,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: Spacing.three,
-  },
-  itemList: {
-    gap: Spacing.three,
+  bannerButton: {
+    flexShrink: 0,
   },
   itemRow: {
-    borderRadius: 8,
-    padding: Spacing.three,
+    minHeight: 76,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.three,
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.three,
   },
+  rowSeparator: {
+    borderBottomWidth: 1,
+  },
   itemCopy: {
     flex: 1,
+    minWidth: 0,
     gap: Spacing.one,
   },
   itemActions: {
@@ -247,39 +293,29 @@ const styles = StyleSheet.create({
     gap: Spacing.one,
   },
   removeButton: {
-    minHeight: 28,
-    justifyContent: 'center',
+    minHeight: 36,
+    paddingHorizontal: Spacing.two,
   },
-  messageState: {
-    minHeight: 180,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: Spacing.four,
-    gap: Spacing.one,
+  finalizeError: {
+    paddingVertical: Spacing.three,
   },
-  messageText: {
-    textAlign: 'center',
+  footerButton: {
+    marginTop: Spacing.one,
   },
-  errorPanel: {
-    borderRadius: 8,
-    padding: Spacing.three,
-    gap: Spacing.one,
-  },
-  primaryButton: {
-    minHeight: 56,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
+  skeletonRow: {
+    minHeight: 76,
     paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.three,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.three,
   },
-  primaryButtonText: {
-    color: '#ffffff',
+  skeletonSeparator: {
+    borderBottomWidth: 1,
   },
-  pressed: {
-    opacity: 0.72,
-  },
-  disabled: {
-    opacity: 0.5,
+  skeletonCopy: {
+    flex: 1,
+    minWidth: 0,
+    gap: Spacing.two,
   },
 });
