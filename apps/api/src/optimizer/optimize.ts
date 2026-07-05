@@ -81,7 +81,13 @@ function buildStoreCandidate(
       continue;
     }
 
-    totalCents += moneyToCents(effectivePrice(price)) * item.qty;
+    const priceValue = effectivePrice(price);
+    if (priceValue === null) {
+      missingItems.push(item.productId);
+      continue;
+    }
+
+    totalCents += moneyToCents(priceValue) * item.qty;
     usedPrices.push(price);
   }
 
@@ -122,7 +128,12 @@ function buildCheaperElsewhere(
       continue;
     }
 
-    const winningPriceCents = moneyToCents(effectivePrice(winningPrice));
+    const winningPriceValue = effectivePrice(winningPrice);
+    if (winningPriceValue === null) {
+      continue;
+    }
+
+    const winningPriceCents = moneyToCents(winningPriceValue);
     let best:
       | {
           storeId: string;
@@ -141,7 +152,12 @@ function buildCheaperElsewhere(
         continue;
       }
 
-      const priceCents = moneyToCents(effectivePrice(price));
+      const priceValue = effectivePrice(price);
+      if (priceValue === null) {
+        continue;
+      }
+
+      const priceCents = moneyToCents(priceValue);
       const deltaCents = winningPriceCents - priceCents;
       const deltaRatio = winningPriceCents === 0 ? 0 : deltaCents / winningPriceCents;
 
@@ -186,11 +202,12 @@ function buildSwapSuggestions(
     }
 
     const originalSize = toComparableSize(original.sizeQty, original.sizeUnit);
-    if (!originalSize) {
+    const originalPriceValue = effectivePrice(originalPrice);
+    if (!originalSize || originalPriceValue === null) {
       continue;
     }
 
-    const originalUnitPrice = moneyToCents(effectivePrice(originalPrice)) / originalSize.qty;
+    const originalUnitPrice = moneyToCents(originalPriceValue) / originalSize.qty;
     let best:
       | {
           toProductId: string;
@@ -210,11 +227,16 @@ function buildSwapSuggestions(
       }
 
       const alternativeSize = toComparableSize(alternative.product.sizeQty, alternative.product.sizeUnit);
-      if (!alternativeSize || alternativeSize.unit !== originalSize.unit) {
+      const alternativePriceValue = effectivePrice(alternativePrice);
+      if (
+        !alternativeSize ||
+        alternativeSize.unit !== originalSize.unit ||
+        alternativePriceValue === null
+      ) {
         continue;
       }
 
-      const alternativeUnitPrice = moneyToCents(effectivePrice(alternativePrice)) / alternativeSize.qty;
+      const alternativeUnitPrice = moneyToCents(alternativePriceValue) / alternativeSize.qty;
       const savingsCents = Math.round((originalUnitPrice - alternativeUnitPrice) * originalSize.qty * item.qty);
 
       if (savingsCents < SWAP_MIN_LINE_SAVINGS_CENTS) {
@@ -255,6 +277,10 @@ function indexPrices(prices: StorePrice[]): Map<string, StorePrice> {
   const index = new Map<string, StorePrice>();
 
   for (const price of prices) {
+    if (effectivePrice(price) === null) {
+      continue;
+    }
+
     const key = priceKey(price.productId, price.storeId);
     const existing = index.get(key);
 
@@ -276,8 +302,8 @@ function oldestCapturedAt(prices: StorePrice[]): string {
     .sort((left, right) => new Date(left).getTime() - new Date(right).getTime())[0];
 }
 
-function effectivePrice(price: StorePrice): number {
-  return price.promoPrice ?? price.price;
+function effectivePrice(price: StorePrice): number | null {
+  return price.promoPrice ?? price.price ?? null;
 }
 
 function moneyToCents(value: number): number {

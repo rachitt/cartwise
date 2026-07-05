@@ -11,7 +11,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { chainLabel, formatPrice, formatProductSize, formatRelativeTime } from '@/lib/price';
+import { chainLabel, formatFreshnessStamp, formatPrice, formatProductSize } from '@/lib/price';
 import { usePreferencesStore } from '@/state/preferences';
 
 const reasonLabel: Record<CartOptimization['swapSuggestions'][number]['reason'], string> = {
@@ -91,7 +91,7 @@ export default function CartResultsScreen() {
           You save {formatPrice(optimization.savings)} vs {worstStore?.name ?? 'the highest total'}
         </ThemedText>
         <ThemedText type="small" themeColor="textSecondary">
-          as of {formatRelativeTime(optimization.pricesAsOf)}
+          {formatFreshnessStamp(optimization.pricesAsOf)}
         </ThemedText>
       </ThemedView>
 

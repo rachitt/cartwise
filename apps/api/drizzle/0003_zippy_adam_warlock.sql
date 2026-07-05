@@ -1,0 +1,1 @@
+CREATE INDEX "price_snapshots_store_product_captured_at_idx" ON "price_snapshots" USING btree ("store_product_id","captured_at" DESC NULLS LAST);

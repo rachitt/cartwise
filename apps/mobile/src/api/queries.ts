@@ -35,7 +35,7 @@ export function useSearchProducts(query: string, storeIds: string[]) {
   return useQuery({
     queryKey: ['search', normalizedQuery, stableStoreIds],
     queryFn: () => searchProducts(normalizedQuery, stableStoreIds),
-    enabled: normalizedQuery.length >= 2 && stableStoreIds.length >= 1,
+    enabled: normalizedQuery.length >= 2,
   });
 }
 
@@ -45,7 +45,7 @@ export function useProductPrices(productId: string, storeIds: string[]) {
   return useQuery({
     queryKey: ['product-prices', productId, stableStoreIds],
     queryFn: () => getProductPrices(productId, stableStoreIds),
-    enabled: productId.length > 0 && stableStoreIds.length >= 1,
+    enabled: productId.length > 0,
   });
 }
 

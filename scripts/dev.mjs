@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
+import { createConnection } from "node:net";
 import { createRequire } from "node:module";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { networkInterfaces } from "node:os";
+import { access, copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -17,11 +19,17 @@ import {
 const rootDir = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const apiDir = path.join(rootDir, "apps", "api");
 const apiEnvPath = path.join(apiDir, ".env");
+const composeOverridePath = path.join(rootDir, "docker-compose.override.yml");
+const composeOverrideExamplePath = path.join(rootDir, "docker-compose.override.example.yml");
 const apiRequire = createRequire(new URL("../apps/api/package.json", import.meta.url));
 const { Pool } = apiRequire("pg");
 
 const probeTimeoutMs = 2_000;
 const dockerWaitMs = 30_000;
+const shutdownGraceMs = 5_000;
+const portReleaseWaitMs = 5_000;
+const devServerPorts = [3000, 8081];
+const localPortProbeHosts = ["127.0.0.1", "::1"];
 
 await main().catch((error) => {
   console.error(`Cartwise dev startup failed: ${friendlyError(error)}`);
@@ -37,6 +45,7 @@ async function main() {
     const dockerAvailable = await commandSucceeds("docker", ["info"]);
     if (dockerAvailable) {
       console.log("No local Postgres candidate accepted connections; Docker is available, so starting docker compose.");
+      await ensureDockerComposeOverride();
       const composeResult = await runSetupCommand("docker", ["compose", "up", "-d", "--wait"]);
       if (composeResult === 0) {
         chosen = await waitForDatabase(buildCandidateConnectionUrls({}), dockerWaitMs);
@@ -203,8 +212,13 @@ async function startFullStack(apiEnv) {
   const api = spawnPrefixed("api", "npm", ["run", "dev", "--workspace", "apps/api"], {
     ...apiEnv,
   });
-  const mobile = spawnPrefixed("mobile", "npm", ["run", "start", "--workspace", "apps/mobile"], process.env);
-  await supervise([api, mobile]);
+  const mobileEnv = {
+    ...process.env,
+    EXPO_PUBLIC_API_URL: process.env.EXPO_PUBLIC_API_URL || defaultExpoApiUrl(),
+  };
+  console.log(`Expo API URL: ${mobileEnv.EXPO_PUBLIC_API_URL}`);
+  const mobile = spawnPrefixed("mobile", "npm", ["run", "start", "--workspace", "apps/mobile"], mobileEnv);
+  await supervise([api, mobile], devServerPorts);
 }
 
 function parseEnvText(envText) {
@@ -249,6 +263,7 @@ function runSetupCommand(command, args, env = process.env) {
 function spawnPrefixed(label, command, args, env) {
   const child = spawn(command, args, {
     cwd: rootDir,
+    detached: true,
     env,
     stdio: ["inherit", "pipe", "pipe"],
   });
@@ -257,40 +272,97 @@ function spawnPrefixed(label, command, args, env) {
   return child;
 }
 
-async function supervise(children) {
-  let shuttingDown = false;
+async function supervise(children, portsToVerify) {
+  let shutdownPromise = null;
 
-  const shutdown = (signal) => {
-    if (shuttingDown) {
-      return;
+  const shutdown = () => {
+    if (!shutdownPromise) {
+      shutdownPromise = shutdownChildren(children, portsToVerify);
     }
-    shuttingDown = true;
-    for (const child of children) {
-      if (!child.killed) {
-        child.kill(signal);
-      }
-    }
+    return shutdownPromise;
   };
 
-  process.once("SIGINT", () => shutdown("SIGINT"));
-  process.once("SIGTERM", () => shutdown("SIGTERM"));
+  process.once("SIGINT", () => {
+    void shutdown();
+  });
+  process.once("SIGTERM", () => {
+    void shutdown();
+  });
 
   const exit = await Promise.race(children.map((child) => childExit(child)));
-  shutdown("SIGTERM");
-  process.exitCode = exit ?? 0;
+  const childExitedBeforeShutdown = !shutdownPromise;
+  const shutdownExit = await shutdown();
+  process.exitCode = shutdownExit !== 0 ? shutdownExit : childExitedBeforeShutdown ? exit ?? 0 : 0;
+}
+
+async function shutdownChildren(children, portsToVerify) {
+  for (const child of children) {
+    signalChildProcessGroup(child, "SIGTERM");
+  }
+
+  const exits = Promise.allSettled(children.map((child) => childExit(child)));
+  const exitedGracefully = await Promise.race([exits.then(() => true), sleep(shutdownGraceMs).then(() => false)]);
+
+  if (!exitedGracefully) {
+    for (const child of children) {
+      signalChildProcessGroup(child, "SIGKILL");
+    }
+    await Promise.allSettled(children.map((child) => childExit(child)));
+  }
+
+  const openPorts = await waitForPortsToClose(portsToVerify, portReleaseWaitMs);
+  if (openPorts.length > 0) {
+    console.error(`Dev server ports still accepting connections after shutdown: ${openPorts.join(", ")}`);
+    return 1;
+  }
+
+  return 0;
+}
+
+function signalChildProcessGroup(child, signal) {
+  if (!isChildRunning(child) || !child.pid) {
+    return;
+  }
+
+  try {
+    process.kill(-child.pid, signal);
+  } catch (error) {
+    if (error?.code === "ESRCH") {
+      return;
+    }
+
+    try {
+      child.kill(signal);
+    } catch (fallbackError) {
+      if (fallbackError?.code !== "ESRCH") {
+        throw fallbackError;
+      }
+    }
+  }
+}
+
+function isChildRunning(child) {
+  return child.exitCode === null && child.signalCode === null;
 }
 
 function childExit(child) {
+  if (!isChildRunning(child)) {
+    return Promise.resolve(exitCodeForChild(child.exitCode, child.signalCode));
+  }
+
   return new Promise((resolve, reject) => {
     child.once("error", reject);
     child.once("exit", (code, signal) => {
-      if (signal === "SIGINT" || signal === "SIGTERM") {
-        resolve(0);
-        return;
-      }
-      resolve(code ?? 1);
+      resolve(exitCodeForChild(code, signal));
     });
   });
+}
+
+function exitCodeForChild(code, signal) {
+  if (signal === "SIGINT" || signal === "SIGTERM") {
+    return 0;
+  }
+  return code ?? 1;
 }
 
 async function commandSucceeds(command, args, timeoutMs = 5_000) {
@@ -321,6 +393,87 @@ function prefixOutput(stream, label, target) {
     if (pending) {
       target.write(`[${label}] ${pending}\n`);
     }
+  });
+}
+
+async function ensureDockerComposeOverride() {
+  try {
+    await access(composeOverridePath);
+    return;
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      throw error;
+    }
+  }
+
+  try {
+    await copyFile(composeOverrideExamplePath, composeOverridePath);
+    console.log("Created docker-compose.override.yml from docker-compose.override.example.yml.");
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      throw new Error("docker-compose.override.example.yml is missing; cannot prepare the default Postgres 5433 override.");
+    }
+    throw error;
+  }
+}
+
+function defaultExpoApiUrl() {
+  return `http://${firstLanIpv4Address()}:3000`;
+}
+
+function firstLanIpv4Address() {
+  for (const addresses of Object.values(networkInterfaces())) {
+    for (const address of addresses ?? []) {
+      const family = typeof address.family === "string" ? address.family : `IPv${address.family}`;
+      if (family === "IPv4" && !address.internal) {
+        return address.address;
+      }
+    }
+  }
+
+  return "localhost";
+}
+
+async function waitForPortsToClose(ports, maxMs) {
+  const deadline = Date.now() + maxMs;
+  let openPorts = await openLocalPorts(ports);
+
+  while (openPorts.length > 0 && Date.now() < deadline) {
+    await sleep(250);
+    openPorts = await openLocalPorts(ports);
+  }
+
+  return openPorts;
+}
+
+async function openLocalPorts(ports) {
+  const results = await Promise.all(ports.map(async (port) => ({ port, open: await canConnectToAnyLocalPort(port) })));
+  return results.filter((result) => result.open).map((result) => result.port);
+}
+
+async function canConnectToAnyLocalPort(port) {
+  const results = await Promise.all(localPortProbeHosts.map((host) => canConnectToLocalPort(host, port)));
+  return results.some(Boolean);
+}
+
+function canConnectToLocalPort(host, port) {
+  return new Promise((resolve) => {
+    const socket = createConnection({ host, port });
+    let settled = false;
+
+    const finish = (open) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      socket.destroy();
+      resolve(open);
+    };
+
+    socket.setTimeout(500);
+    socket.once("connect", () => finish(true));
+    socket.once("error", () => finish(false));
+    socket.once("timeout", () => finish(false));
   });
 }
 

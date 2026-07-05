@@ -20,6 +20,8 @@ export type CacheWithMeta = Cache & {
   withCacheMeta<T>(key: string, ttlSeconds: number, fn: () => Promise<T>): Promise<CacheResult<T>>;
 };
 
+const inFlightByDb = new WeakMap<CacheDb, Map<string, Promise<CacheResult<unknown>>>>();
+
 export function createCache(
   db: CacheDb,
   now: () => Date = () => new Date(),
@@ -37,18 +39,34 @@ export function createCache(
       return { value: cached.value, fresh: true, capturedAt: cached.storedAt };
     }
 
-    try {
+    const inFlight = getInFlightMap(db);
+    const pending = inFlight.get(key) as Promise<CacheResult<T>> | undefined;
+    if (pending) {
+      return pending;
+    }
+
+    const load = (async (): Promise<CacheResult<T>> => {
       const value = await fn();
       const expiresAt = new Date(currentTime.getTime() + ttlSeconds * 1_000);
       await db.setCacheEntry(key, { v: value, storedAt: currentTime.toISOString() }, expiresAt);
       return { value, fresh: true, capturedAt: currentTime };
-    } catch (error) {
-      if (entry) {
-        const cached = readCachePayload<T>(entry, ttlSeconds);
-        return { value: cached.value, fresh: false, capturedAt: cached.storedAt };
+    })().catch((error: unknown) => {
+      if (!entry) {
+        throw error;
       }
 
-      throw error;
+      const cached = readCachePayload<T>(entry, ttlSeconds);
+      return { value: cached.value, fresh: false, capturedAt: cached.storedAt };
+    });
+
+    inFlight.set(key, load as Promise<CacheResult<unknown>>);
+
+    try {
+      return await load;
+    } finally {
+      if (inFlight.get(key) === load) {
+        inFlight.delete(key);
+      }
     }
   }
 
@@ -60,6 +78,17 @@ export function createCache(
 
     withCacheMeta,
   };
+}
+
+function getInFlightMap(db: CacheDb): Map<string, Promise<CacheResult<unknown>>> {
+  const existing = inFlightByDb.get(db);
+  if (existing) {
+    return existing;
+  }
+
+  const inFlight = new Map<string, Promise<CacheResult<unknown>>>();
+  inFlightByDb.set(db, inFlight);
+  return inFlight;
 }
 
 function readCachePayload<T>(

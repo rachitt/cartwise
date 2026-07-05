@@ -1,4 +1,6 @@
 import type { CollectedProduct, CollectedStore, Collector } from "./types.js";
+import type { CollectorHttp } from "./http.js";
+import { createCollectorHttp } from "./http.js";
 import { CollectorError } from "./types.js";
 
 const DEFAULT_BASE_URL = "https://www.aldi.us";
@@ -164,8 +166,10 @@ export class AldiCollector implements Collector {
 
   private readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;
+  private readonly http: CollectorHttp;
   private readonly now: () => number;
   private readonly sessions = new Map<string, AldiSession>();
+  private readonly sessionRefreshPromises = new Map<string, Promise<AldiSession>>();
   private readonly operationHashes = new Map<string, string>(
     Object.entries(DEFAULT_OPERATION_HASHES),
   );
@@ -178,6 +182,13 @@ export class AldiCollector implements Collector {
     if (!this.fetchImpl) {
       throw new Error("AldiCollector requires a fetch implementation");
     }
+
+    this.http = createCollectorHttp({
+      chain: this.chain,
+      fetch: this.fetchImpl,
+      now: this.now,
+      headers: { "User-Agent": USER_AGENT },
+    });
   }
 
   async findStores(zip: string): Promise<CollectedStore[]> {
@@ -291,6 +302,19 @@ export class AldiCollector implements Collector {
       return cached;
     }
 
+    const inFlightRefresh = this.sessionRefreshPromises.get(postalCode);
+    if (inFlightRefresh) {
+      return inFlightRefresh;
+    }
+
+    const refreshPromise = this.refreshSession(postalCode).finally(() => {
+      this.sessionRefreshPromises.delete(postalCode);
+    });
+    this.sessionRefreshPromises.set(postalCode, refreshPromise);
+    return refreshPromise;
+  }
+
+  private async refreshSession(postalCode: string): Promise<AldiSession> {
     const html = await this.fetchText(this.buildStorefrontUrl(postalCode));
     const session = parseSessionState(html, postalCode, this.now());
     this.sessions.set(postalCode, session);
@@ -325,6 +349,7 @@ export class AldiCollector implements Collector {
     variables: Record<string, unknown>,
     session: AldiSession,
     didRefreshHashes = false,
+    didRefreshSession = false,
   ): Promise<TData> {
     const operationHash = this.operationHashes.get(operationName);
     if (!operationHash) {
@@ -339,7 +364,7 @@ export class AldiCollector implements Collector {
       JSON.stringify({ persistedQuery: { version: 1, sha256Hash: operationHash } }),
     );
 
-    const response = await this.fetchImpl(url.toString(), {
+    const response = await this.http.request(url.toString(), {
       headers: {
         Accept: "application/json",
         Authorization: `Bearer ${session.token}`,
@@ -349,6 +374,18 @@ export class AldiCollector implements Collector {
     });
 
     if (response.status === 401 || response.status === 403) {
+      if (!didRefreshSession) {
+        const refreshedSession = await this.getSession(session.postalCode, true);
+        replaceSession(session, refreshedSession);
+        return this.requestGraphql<TData>(
+          operationName,
+          variables,
+          session,
+          didRefreshHashes,
+          true,
+        );
+      }
+
       throw new CollectorError(this.chain, "auth", "ALDI GraphQL rejected guest session");
     }
 
@@ -377,10 +414,28 @@ export class AldiCollector implements Collector {
 
       if (/persisted query/i.test(message) && !didRefreshHashes) {
         await this.refreshOperationHashes();
-        return this.requestGraphql<TData>(operationName, variables, session, true);
+        return this.requestGraphql<TData>(
+          operationName,
+          variables,
+          session,
+          true,
+          didRefreshSession,
+        );
       }
 
       if (/not authenticated/i.test(message)) {
+        if (!didRefreshSession) {
+          const refreshedSession = await this.getSession(session.postalCode, true);
+          replaceSession(session, refreshedSession);
+          return this.requestGraphql<TData>(
+            operationName,
+            variables,
+            session,
+            didRefreshHashes,
+            true,
+          );
+        }
+
         throw new CollectorError(this.chain, "auth", "ALDI GraphQL rejected guest session");
       }
 
@@ -422,7 +477,7 @@ export class AldiCollector implements Collector {
   }
 
   private async fetchText(url: string): Promise<string> {
-    const response = await this.fetchImpl(url, {
+    const response = await this.http.request(url, {
       headers: {
         Accept: "text/html,application/xhtml+xml,application/javascript,application/json",
         "User-Agent": USER_AGENT,
@@ -445,7 +500,13 @@ export class AldiCollector implements Collector {
       );
     }
 
-    return response.text();
+    try {
+      return await response.text();
+    } catch (error) {
+      throw new CollectorError(this.chain, "parse", "ALDI storefront response was unreadable", {
+        cause: error,
+      });
+    }
   }
 
   private buildStorefrontUrl(postalCode: string): string {
@@ -649,6 +710,15 @@ function mapPrice(price: AldiPrice | null): { price: number | null; promoPrice: 
   return { price: currentPrice, promoPrice: null };
 }
 
+function replaceSession(target: AldiSession, source: AldiSession): void {
+  target.token = source.token;
+  target.expiresAt = source.expiresAt;
+  target.postalCode = source.postalCode;
+  target.zoneId = source.zoneId;
+  target.shops = source.shops;
+  target.locations = source.locations;
+}
+
 function encodeExternalLocationId(context: AldiShopContext): string {
   return [
     context.retailerLocationId,
@@ -793,20 +863,22 @@ function parseZip(value: string): string {
 }
 
 function parseMoney(value: unknown): number | null {
+  let parsed: number;
+
   if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
-  }
+    parsed = value;
+  } else if (typeof value === "string") {
+    const match = value.match(/\$(-?[0-9]+(?:\.[0-9]{1,2})?)/);
+    if (!match) {
+      return null;
+    }
 
-  if (typeof value !== "string") {
+    parsed = Number(match[1]);
+  } else {
     return null;
   }
 
-  const match = value.match(/\$([0-9]+(?:\.[0-9]{1,2})?)/);
-  if (!match) {
-    return null;
-  }
-
-  return Number(match[1]);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
 function requiredString(value: unknown, field: string): string {

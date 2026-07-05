@@ -128,6 +128,22 @@ describe("optimizeCart", () => {
     expect(result.savings).toBe(6);
   });
 
+  it("treats null prices as unavailable instead of free", () => {
+    const result = optimizeCart({
+      items: [{ productId: "milk", qty: 1 }],
+      stores: [store("unknown-price", "Unknown Price"), store("priced", "Priced")],
+      prices: [nullPrice("milk", "unknown-price"), price("milk", "priced", 4)],
+      alternatives: withOriginals(product("milk")),
+    });
+
+    expect(result.winningStoreId).toBe("priced");
+    expect(result.perStoreTotals).toContainEqual({
+      storeId: "unknown-price",
+      total: 0,
+      missingItems: ["milk"],
+    });
+  });
+
   it("flags the best cheaper-elsewhere price per item by per-unit delta", () => {
     const result = optimizeCart({
       items: [
@@ -269,6 +285,17 @@ function price(
     price: priceValue,
     promoPrice,
     capturedAt,
+    source: "kroger",
+  };
+}
+
+function nullPrice(productId: string, storeId: string): StorePrice {
+  return {
+    productId,
+    storeId,
+    price: null as unknown as number,
+    promoPrice: null,
+    capturedAt: "2026-07-04T12:00:00.000Z",
     source: "kroger",
   };
 }
