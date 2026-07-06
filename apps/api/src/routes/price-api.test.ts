@@ -256,6 +256,38 @@ describe("priceApiPlugin collector degradation", () => {
     ]);
     expect(db.snapshotInserts).toBe(0);
   });
+
+  it("filters off-intent retailer products from search before matching", async () => {
+    const storeId = "10000000-0000-4000-8000-000000000001";
+    const db = fakeSearchDb(storeId);
+    app = Fastify();
+    await app.register(priceApiPlugin, {
+      db,
+      getCollector: (chain: ChainSlug) =>
+        chain === "kroger"
+          ? collectorFor(chain, {
+              products: [
+                collectedProduct({ externalProductId: "eggs-1", name: "Grade A Large Eggs" }),
+                collectedProduct({ externalProductId: "whites-1", name: "Liquid Egg Whites" }),
+                collectedProduct({ externalProductId: "bacon-1", name: "Premium Sliced Bacon" }),
+                collectedProduct({ externalProductId: "noodles-1", name: "Wide Egg Noodles" }),
+              ],
+            })
+          : null,
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/search?q=eggs&storeIds=${storeId}`,
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().results.map((result: { product: { name: string } }) => result.product.name)).toEqual([
+      "Grade A Large Eggs",
+      "Liquid Egg Whites",
+    ]);
+    expect(db.insertedProductNames).toEqual(["Grade A Large Eggs", "Liquid Egg Whites"]);
+  });
 });
 
 function throwingDb(): CartwiseDb {
@@ -274,6 +306,7 @@ function throwingDb(): CartwiseDb {
 function collectorFor(
   chain: ChainSlug,
   data: {
+    products?: CollectedProduct[];
     stores?: CollectedStore[];
   },
 ): Collector {
@@ -283,11 +316,27 @@ function collectorFor(
       return data.stores ?? [];
     },
     async searchProducts() {
-      return [];
+      return data.products ?? [];
     },
     async getPrices() {
       return [];
     },
+  };
+}
+
+function collectedProduct(overrides: Partial<CollectedProduct> = {}): CollectedProduct {
+  return {
+    externalProductId: "external-product-1",
+    name: "Product",
+    brand: "Store",
+    sizeRaw: "12 ct",
+    upc: null,
+    category: null,
+    imageUrl: null,
+    price: 2.99,
+    promoPrice: null,
+    capturedAt: new Date("2026-07-04T12:00:00Z"),
+    ...overrides,
   };
 }
 
@@ -447,4 +496,96 @@ function fakeProductPricesDb(input: {
   });
 
   return proxied as unknown as CartwiseDb & CacheDb & { snapshotInserts: number };
+}
+
+function fakeSearchDb(storeId: string): CartwiseDb & CacheDb & { insertedProductNames: string[] } {
+  const cacheEntries = new Map<string, CacheEntry>();
+  const insertedProductNames: string[] = [];
+  const products = new Map<string, {
+    id: string;
+    name: string;
+    brand: string | null;
+    sizeQty: number | null;
+    sizeUnit: string | null;
+    upc: string | null;
+    category: string | null;
+    imageUrl: string | null;
+  }>();
+  const store = {
+    id: storeId,
+    chainSlug: "kroger" as const,
+    externalLocationId: "external-store-1",
+    name: "Kroger",
+    address: "1 Main St",
+    zip: "45202",
+    lat: 39.1,
+    lng: -84.5,
+  };
+
+  const target = {
+    insertedProductNames,
+    async getCacheEntry(key: string) {
+      return cacheEntries.get(key) ?? null;
+    },
+    async setCacheEntry(key: string, payload: unknown, expiresAt: Date) {
+      cacheEntries.set(key, { key, payload, expiresAt });
+    },
+    async getStoresByIds(ids: string[]) {
+      return ids.includes(store.id) ? [store] : [];
+    },
+    async findProductByUpc() {
+      return null;
+    },
+    async findProductByIdentity() {
+      return null;
+    },
+    async insertProduct(input: {
+      name: string;
+      brand: string | null;
+      sizeQty: number | null;
+      sizeUnit: string | null;
+      upc: string | null;
+      category: string | null;
+      imageUrl: string | null;
+    }) {
+      insertedProductNames.push(input.name);
+      const product = {
+        id: `00000000-0000-4000-8000-${String(products.size + 1).padStart(12, "0")}`,
+        ...input,
+      };
+      products.set(product.id, product);
+      return product;
+    },
+    async upsertStoreProduct(productId: string, productStoreId: string, externalProductId: string) {
+      return {
+        id: `store-product-${externalProductId}`,
+        productId,
+        storeId: productStoreId,
+        externalProductId,
+      };
+    },
+    async insertPriceSnapshot(input: {
+      storeProductId: string;
+      price: number;
+      promoPrice: number | null;
+      capturedAt: Date;
+      source: ChainSlug;
+    }) {
+      return { id: `price-${input.storeProductId}`, ...input };
+    },
+  };
+
+  const proxied = new Proxy(target, {
+    get(targetObject, property) {
+      if (property in targetObject) {
+        return targetObject[property as keyof typeof targetObject];
+      }
+
+      return async () => {
+        throw new Error(`Unexpected DB call: ${String(property)}`);
+      };
+    },
+  });
+
+  return proxied as unknown as CartwiseDb & CacheDb & { insertedProductNames: string[] };
 }
