@@ -45,12 +45,12 @@ const styles = StyleSheet.create({
   card: {
     alignItems: 'center',
     gap: Spacing.two,
-    paddingVertical: Spacing.five,
+    paddingVertical: Spacing.four,
     paddingHorizontal: Spacing.four,
   },
   iconWell: {
-    width: 52,
-    height: 52,
+    width: 48,
+    height: 48,
     borderRadius: Radii.chip,
     alignItems: 'center',
     justifyContent: 'center',

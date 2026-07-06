@@ -20,17 +20,17 @@ The memorability comes from the price typography and receipt vernacular, not the
 
 | Role | Light | Dark | Use |
 |---|---|---|---|
-| `background` | `#FAF9F6` warm paper | `#0E1411` | screen background |
-| `backgroundElement` | `#FFFFFF` | `#181F1A` | cards, panels, list groups |
-| `backgroundSelected` | `#ECEFEA` | `#232C25` | pressed/selected fills |
-| `text` | `#1B2620` evergreen ink | `#E9F0E9` | primary text |
-| `textSecondary` | `#5F6D64` | `#9CAAA0` | meta, captions |
-| `accent` | `#175E3E` evergreen | `#5FC98E` | brand, primary buttons, best price |
-| `accentMuted` | `#E6F2E8` mint wash | `#173626` | best-price row wash, brand chips |
+| `background` | `#FFFDF8` warm paper | `#101611` | screen background |
+| `backgroundElement` | `#FFFFFF` | `#1B241D` | cards, panels, list groups |
+| `backgroundSelected` | `#F1F5EF` | `#253127` | pressed/selected fills |
+| `text` | `#17231D` evergreen ink | `#EFF7EF` | primary text |
+| `textSecondary` | `#647369` | `#A9B8AD` | meta, captions |
+| `accent` | `#0F6B45` evergreen | `#78DFA5` | brand, primary buttons, best price |
+| `accentMuted` | `#EAF7EE` mint wash | `#173D29` | best-price row wash, brand chips |
 | `onAccent` | `#FFFFFF` | `#0B2417` | text/icons on `accent` fills |
-| `deal` | `#B0540C` deal-tag orange | `#F0A05C` | savings deltas, price drops — NOTHING else |
-| `dealMuted` | `#FBEEDD` | `#3A2A18` | savings chip fill |
-| `border` | `#E3E7E0` | `#2A332C` | hairlines, input borders |
+| `deal` | `#B95714` deal-tag orange | `#F2A35C` | savings deltas, price drops — NOTHING else |
+| `dealMuted` | `#FFF0DE` | `#3F2A17` | savings chip fill |
+| `border` | `#DDE7DC` | `#344237` | hairlines, input borders |
 | `danger` | `#B3261E` | `#F2B8B5` | errors, destructive |
 | `dangerMuted` | `#F9E2E0` | `#42201E` | error panel fill |
 
@@ -49,7 +49,7 @@ Body face: system (SF Pro / Roboto) — native feel, zero load cost. Stamps: pla
 
 | Variant | Face | Size/Line | Weight | Use |
 |---|---|---|---|---|
-| `display` | Bricolage | 32/36, -0.5 tracking | 700 | screen titles |
+| `display` | Bricolage | 32/36, 0 tracking | 700 | screen titles |
 | `title` | Bricolage | 22/28 | 600 | hero/card titles |
 | `heading` | system | 17/22 | 600 | section headings |
 | `body` (`default`) | system | 16/24 | 400 | copy |
@@ -57,7 +57,7 @@ Body face: system (SF Pro / Roboto) — native feel, zero load cost. Stamps: pla
 | `small` | system | 14/20 | 500 | row meta |
 | `smallBold` | system | 14/20 | 700 | row titles, labels |
 | `caption` | system | 12/16 | 500 | fine print |
-| `eyebrow` | system | 12/16, +0.8 tracking, uppercase | 700 | section eyebrows ("RECENT DROPS") |
+| `eyebrow` | system | 12/16, 0 tracking, uppercase | 700 | section eyebrows ("RECENT DROPS") |
 | `stamp` | mono | 11/14 | 500 | freshness timestamps only |
 
 All money uses `fontVariant: ['tabular-nums']` — handled by `PriceText`, never hand-rolled.

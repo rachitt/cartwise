@@ -1,5 +1,6 @@
 import { Tabs } from 'expo-router';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
+import { Platform, StyleSheet } from 'react-native';
 
 import { useCurrentCart } from '@/api/queries';
 import { useTheme } from '@/hooks/use-theme';
@@ -26,6 +27,17 @@ export default function AppTabs() {
         tabBarStyle: {
           backgroundColor: colors.backgroundElement,
           borderTopColor: colors.border,
+          borderTopWidth: StyleSheet.hairlineWidth,
+          height: Platform.select({ ios: 86, android: 76, default: 76 }),
+          paddingTop: 8,
+          paddingBottom: Platform.select({ ios: 22, android: 10, default: 10 }),
+        },
+        tabBarLabelStyle: {
+          fontSize: 11,
+          fontWeight: '700',
+        },
+        tabBarItemStyle: {
+          paddingVertical: 2,
         },
         tabBarBadgeStyle: {
           backgroundColor: colors.accent,
