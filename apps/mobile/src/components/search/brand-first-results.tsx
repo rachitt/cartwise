@@ -285,7 +285,8 @@ function BrandProductCard({
     cheapestValue === null
       ? null
       : formatUnitPriceLabel(cheapestValue, result.product.sizeQty, result.product.sizeUnit);
-  const metaLabel = getProductMeta(result.product, unitPriceLabel, result.match);
+  const metaLabel = getProductMeta(result.product, unitPriceLabel);
+  const productMatchLabel = matchLabel(result.match);
 
   return (
     <Animated.View
@@ -307,6 +308,9 @@ function BrandProductCard({
             <ThemedText type="caption" themeColor="textSecondary" numberOfLines={1}>
               {metaLabel}
             </ThemedText>
+            {productMatchLabel ? (
+              <Chip label={productMatchLabel} tone="neutral" style={styles.matchChip} />
+            ) : null}
           </View>
           <View style={styles.productAction}>
             <AddToCartControl
@@ -487,14 +491,10 @@ function priceSpread(prices: StorePrice[]) {
   return highest - lowest;
 }
 
-function getProductMeta(
-  product: Product,
-  unitPriceLabel: string | null,
-  match: ProductMatchSummary | undefined,
-) {
+function getProductMeta(product: Product, unitPriceLabel: string | null) {
   const size = formatProductSize(product.sizeQty, product.sizeUnit);
 
-  return [size, product.category, unitPriceLabel ? `best ${unitPriceLabel}` : null, matchLabel(match)]
+  return [size, product.category, unitPriceLabel ? `best ${unitPriceLabel}` : null]
     .filter(Boolean)
     .join(' · ') || 'Details unavailable';
 }
@@ -589,6 +589,9 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
     gap: Spacing.half,
+  },
+  matchChip: {
+    marginTop: Spacing.half,
   },
   productAction: {
     flexShrink: 0,
