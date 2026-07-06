@@ -47,6 +47,16 @@ const WARNING_ICON = {
   android: 'warning',
   web: 'warning',
 } satisfies SymbolViewProps['name'];
+const XMARK_ICON = {
+  ios: 'xmark',
+  android: 'close',
+  web: 'close',
+} satisfies SymbolViewProps['name'];
+const ARROW_ICON = {
+  ios: 'arrow.right',
+  android: 'arrow_forward',
+  web: 'arrow_forward',
+} satisfies SymbolViewProps['name'];
 
 export default function SearchScreen() {
   const zip = usePreferencesStore((state) => state.zip);
@@ -61,6 +71,7 @@ export default function SearchScreen() {
   const searchQuery = useSearchProducts(submittedSearchText, activeStoreIds);
   const cartQuery = useCurrentCart();
   const updateCartItem = useUpdateCartItem();
+  const theme = useTheme();
 
   const cartQtyByProductId = useMemo(
     () => new Map((cartQuery.data?.cart.items ?? []).map((item) => [item.productId, item.qty])),
@@ -127,28 +138,40 @@ export default function SearchScreen() {
           contentContainerStyle={styles.content}
           style={styles.scrollView}>
           <View style={styles.header}>
-            <ThemedText type="eyebrow" themeColor="accent">
-              CARTWISE
-            </ThemedText>
-            <View style={styles.titleRow}>
-              <ThemedText type="display" style={styles.title}>
-                Search
+            <View style={styles.kickerRow}>
+              <ThemedText type="eyebrow" themeColor="accent">
+                CARTWISE
               </ThemedText>
+            </View>
+            <ThemedText type="display" style={styles.title}>
+              Find prices
+            </ThemedText>
+            <View
+              style={[
+                styles.storeStatusCard,
+                { backgroundColor: theme.backgroundElement, borderColor: theme.border },
+              ]}>
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={`Change location, currently ZIP ${zip}`}
                 hitSlop={8}
                 onPress={resetLocation}
-                style={({ pressed }) => [styles.zipButton, pressed && styles.pressed]}>
+                style={({ pressed }) => [styles.statusZipButton, pressed && styles.pressed]}>
                 <Chip label={`ZIP ${zip}`} tone="accent" />
               </Pressable>
+              <View style={[styles.statusDot, { backgroundColor: theme[storeStatus.tone] }]} />
+              <ThemedText
+                type="small"
+                themeColor={storeStatus.tone}
+                numberOfLines={2}
+                style={styles.statusText}>
+                {storeStatus.message}
+              </ThemedText>
             </View>
-            <ThemedText type="small" themeColor={storeStatus.tone}>
-              {storeStatus.message}
-            </ThemedText>
           </View>
 
           <SearchField
+            canSubmit={searchText.trim().length >= MIN_SEARCH_LENGTH && activeStoreIds.length > 0}
             value={searchText}
             onChangeText={setSearchText}
             onClear={clearSearch}
@@ -215,11 +238,13 @@ export default function SearchScreen() {
 }
 
 function SearchField({
+  canSubmit,
   value,
   onChangeText,
   onClear,
   onSubmit,
 }: {
+  canSubmit: boolean;
   value: string;
   onChangeText: (value: string) => void;
   onClear: () => void;
@@ -243,7 +268,11 @@ function SearchField({
     <Animated.View
       style={[
         styles.searchField,
-        { backgroundColor: theme.backgroundElement, borderColor: theme.border },
+        {
+          backgroundColor: theme.backgroundElement,
+          borderColor: theme.border,
+          shadowColor: theme.text,
+        },
         animatedBorderStyle,
       ]}>
       <SymbolView name={SEARCH_ICON} tintColor={theme.textSecondary} size={20} />
@@ -273,11 +302,29 @@ function SearchField({
             { backgroundColor: theme.backgroundSelected },
             pressed && styles.pressed,
           ]}>
-          <ThemedText type="caption" themeColor="textSecondary" style={styles.clearGlyph}>
-            ✕
-          </ThemedText>
+          <SymbolView name={XMARK_ICON} tintColor={theme.textSecondary} size={14} />
         </Pressable>
       ) : null}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Search prices"
+        accessibilityState={{ disabled: !canSubmit }}
+        disabled={!canSubmit}
+        hitSlop={8}
+        onPress={onSubmit}
+        style={({ pressed }) => [
+          styles.submitButton,
+          { backgroundColor: canSubmit ? theme.accent : theme.backgroundSelected },
+          pressed && styles.pressed,
+          !canSubmit && styles.disabledSubmit,
+        ]}>
+        <SymbolView
+          name={ARROW_ICON}
+          tintColor={canSubmit ? theme.onAccent : theme.textSecondary}
+          size={17}
+          weight="semibold"
+        />
+      </Pressable>
     </Animated.View>
   );
 }
@@ -367,26 +414,44 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.four,
     paddingTop: Spacing.four,
     paddingBottom: BottomTabInset + Spacing.five,
-    gap: Spacing.four,
+    gap: Spacing.three,
   },
   header: {
-    gap: Spacing.one,
+    gap: Spacing.two,
   },
-  titleRow: {
+  kickerRow: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
+    alignItems: 'center',
     justifyContent: 'space-between',
     gap: Spacing.three,
   },
   title: {
     flexShrink: 1,
   },
-  zipButton: {
+  storeStatusCard: {
     minHeight: 44,
-    justifyContent: 'center',
+    borderWidth: 1,
+    borderRadius: Radii.control,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
+  },
+  statusZipButton: {
+    flexShrink: 0,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: Radii.chip,
+  },
+  statusText: {
+    flex: 1,
+    minWidth: 0,
   },
   searchField: {
-    minHeight: 56,
+    minHeight: 60,
     borderRadius: Radii.chip,
     borderWidth: 1,
     flexDirection: 'row',
@@ -394,6 +459,10 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
     paddingLeft: Spacing.three,
     paddingRight: Spacing.two,
+    shadowOpacity: 0.05,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 2,
   },
   searchInput: {
     flex: 1,
@@ -411,8 +480,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  clearGlyph: {
-    lineHeight: 16,
+  submitButton: {
+    width: 40,
+    height: 40,
+    borderRadius: Radii.chip,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  disabledSubmit: {
+    opacity: 0.65,
   },
   resultsSection: {
     gap: Spacing.two,

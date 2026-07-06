@@ -42,7 +42,7 @@ const styles = StyleSheet.create({
     fontFamily: FontFamilies.displayBold,
     fontSize: 32,
     lineHeight: 36,
-    letterSpacing: -0.5,
+    letterSpacing: 0,
   },
   title: {
     fontFamily: FontFamilies.displaySemiBold,
@@ -83,7 +83,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 16,
     fontWeight: 700,
-    letterSpacing: 0.8,
+    letterSpacing: 0,
     textTransform: 'uppercase',
   },
   stamp: {

@@ -1,6 +1,5 @@
 import type { Product, Store, StorePrice } from '@cartwise/shared';
 import type { SearchResult } from '@/api/client';
-import { Image } from 'expo-image';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, {
@@ -16,6 +15,7 @@ import { AppButton } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Chip } from '@/components/ui/chip';
 import { PriceText } from '@/components/ui/price-text';
+import { ProductThumb as UiProductThumb } from '@/components/ui/product-thumb';
 import { ReceiptRow } from '@/components/ui/receipt-row';
 import { Motion, Radii, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -26,6 +26,11 @@ const CHEVRON_ICON = {
   ios: 'chevron.right',
   android: 'chevron_right',
   web: 'chevron_right',
+} satisfies SymbolViewProps['name'];
+const BACK_ICON = {
+  ios: 'chevron.left',
+  android: 'chevron_left',
+  web: 'chevron_left',
 } satisfies SymbolViewProps['name'];
 
 type BrandFirstSearchResultsProps = {
@@ -152,6 +157,9 @@ function BrandRow({
   onPress: () => void;
 }) {
   const theme = useTheme();
+  const displayName = formatDisplayName(brand.name);
+  const productLabel = `${brand.productCount} ${brand.productCount === 1 ? 'product' : 'products'}`;
+  const storeLabel = `${brand.storeCount} ${brand.storeCount === 1 ? 'store' : 'stores'}`;
 
   return (
     <View
@@ -162,28 +170,26 @@ function BrandRow({
       ]}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`Show ${brand.name} products`}
+        accessibilityLabel={`Show ${displayName} products`}
         onPress={onPress}
         style={({ pressed }) => [styles.brandRow, pressed && styles.pressed]}>
-        <ProductThumb product={brand.thumbnailProduct} />
+        <ProductThumb product={brand.thumbnailProduct} size={56} />
         <View style={styles.brandCopy}>
-          <ThemedText type="smallBold" numberOfLines={1}>
-            {brand.name}
+          <ThemedText type="bodyBold" numberOfLines={1}>
+            {displayName}
           </ThemedText>
           <ThemedText type="caption" themeColor="textSecondary" numberOfLines={1}>
-            {brand.productCount} {brand.productCount === 1 ? 'product' : 'products'}
+            {productLabel} · {storeLabel}
           </ThemedText>
-          <View style={styles.brandMetaRow}>
-            <View style={styles.priceLine}>
-              <ThemedText type="caption" themeColor="textSecondary" style={styles.fromText}>
-                from
-              </ThemedText>
-              <PriceText value={brand.lowestPrice} size="sm" color="accent" />
-            </View>
-            {brand.storeCount >= 2 ? (
-              <Chip label={`Saves ${formatPrice(brand.maxSavings)}`} tone="deal" />
-            ) : null}
-          </View>
+          {brand.storeCount >= 2 && brand.maxSavings > 0 ? (
+            <Chip label={`Saves ${formatPrice(brand.maxSavings)}`} tone="deal" />
+          ) : null}
+        </View>
+        <View style={styles.brandPriceBlock}>
+          <ThemedText type="caption" themeColor="textSecondary">
+            from
+          </ThemedText>
+          <PriceText value={brand.lowestPrice} size="sm" color="accent" />
         </View>
         <SymbolView name={CHEVRON_ICON} tintColor={theme.textSecondary} size={15} weight="semibold" />
       </Pressable>
@@ -206,23 +212,32 @@ function BrandDetail({
   onBackToBrands: () => void;
   onChangeQty: (productId: string, qty: number) => void;
 }) {
+  const theme = useTheme();
+
   return (
     <>
       <View style={styles.detailHeader}>
-        <AppButton
-          haptic="light"
-          label="‹ All brands"
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Back to all brands"
           onPress={onBackToBrands}
-          size="md"
-          style={styles.backButton}
-          variant="ghost"
-        />
+          style={({ pressed }) => [
+            styles.backButton,
+            { backgroundColor: theme.backgroundSelected },
+            pressed && styles.pressed,
+          ]}>
+          <SymbolView name={BACK_ICON} tintColor={theme.accent} size={15} weight="semibold" />
+          <ThemedText type="smallBold" themeColor="accent">
+            All brands
+          </ThemedText>
+        </Pressable>
         <View style={styles.detailTitleBlock}>
           <ThemedText type="heading" numberOfLines={1}>
-            {brandGroup.name}
+            {formatDisplayName(brandGroup.name)}
           </ThemedText>
           <ThemedText type="caption" themeColor="textSecondary">
-            {brandGroup.productCount} {brandGroup.productCount === 1 ? 'product' : 'products'}
+            {brandGroup.productCount} {brandGroup.productCount === 1 ? 'product' : 'products'} · from{' '}
+            {formatPrice(brandGroup.lowestPrice)}
           </ThemedText>
         </View>
       </View>
@@ -274,7 +289,7 @@ function BrandProductCard({
       }>
       <Card style={styles.productCard}>
         <View style={styles.productHeader}>
-          <ProductThumb product={result.product} />
+          <ProductThumb product={result.product} size={56} />
           <View style={styles.productCopy}>
             <ThemedText type="smallBold" numberOfLines={2}>
               {result.product.name}
@@ -316,21 +331,8 @@ function BrandProductCard({
   );
 }
 
-function ProductThumb({ product }: { product: Product }) {
-  const theme = useTheme();
-  const fallback = product.name.trim().slice(0, 1).toUpperCase() || '?';
-
-  return (
-    <View style={[styles.productThumb, { backgroundColor: theme.accentMuted }]}>
-      {product.imageUrl ? (
-        <Image source={product.imageUrl} contentFit="cover" style={styles.productImage} />
-      ) : (
-        <ThemedText type="smallBold" themeColor="accent">
-          {fallback}
-        </ThemedText>
-      )}
-    </View>
-  );
+function ProductThumb({ product, size }: { product: Product; size: number }) {
+  return <UiProductThumb imageUrl={product.imageUrl} name={product.name} size={size} />;
 }
 
 function AddToCartControl({
@@ -409,6 +411,20 @@ function getBrandName(brand: string | null) {
   return trimmed && trimmed.length > 0 ? trimmed : OTHER_BRANDS;
 }
 
+function formatDisplayName(value: string) {
+  return value
+    .trim()
+    .split(/\s+/)
+    .map((word) => {
+      if (word.length <= 3 && word === word.toUpperCase()) {
+        return word;
+      }
+
+      return word.slice(0, 1).toUpperCase() + word.slice(1).toLowerCase();
+    })
+    .join(' ');
+}
+
 function compareBrandGroups(first: BrandGroup, second: BrandGroup) {
   if (first.isOther !== second.isOther) {
     return first.isOther ? 1 : -1;
@@ -473,7 +489,7 @@ function formatStoreMeta(store: Store) {
 
 const styles = StyleSheet.create({
   stage: {
-    gap: Spacing.two,
+    gap: Spacing.three,
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -491,44 +507,36 @@ const styles = StyleSheet.create({
     borderBottomWidth: 0,
   },
   brandRow: {
-    minHeight: 80,
+    minHeight: 92,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.two,
+    gap: Spacing.three,
     paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two,
+    paddingVertical: Spacing.three,
   },
   brandCopy: {
     flex: 1,
     minWidth: 0,
     gap: Spacing.half,
   },
-  brandMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: Spacing.two,
-    paddingTop: Spacing.half,
-  },
-  priceLine: {
-    flexDirection: 'row',
+  brandPriceBlock: {
+    minWidth: 58,
     alignItems: 'flex-end',
-    gap: Spacing.one,
-  },
-  fromText: {
-    paddingBottom: 1,
   },
   detailHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
     gap: Spacing.two,
   },
   backButton: {
-    paddingHorizontal: 0,
+    minHeight: 36,
+    alignSelf: 'flex-start',
+    borderRadius: Radii.chip,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one,
+    paddingHorizontal: Spacing.two + Spacing.half,
   },
   detailTitleBlock: {
-    flex: 1,
-    minWidth: 0,
+    gap: Spacing.half,
   },
   productList: {
     gap: Spacing.two,
@@ -537,10 +545,10 @@ const styles = StyleSheet.create({
     gap: Spacing.three,
   },
   productHeader: {
-    minHeight: 48,
+    minHeight: 56,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.two,
+    gap: Spacing.three,
   },
   productCopy: {
     flex: 1,
@@ -550,19 +558,6 @@ const styles = StyleSheet.create({
   productAction: {
     flexShrink: 0,
     alignItems: 'flex-end',
-  },
-  productThumb: {
-    width: 48,
-    height: 48,
-    borderRadius: Radii.thumb,
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  productImage: {
-    width: 48,
-    height: 48,
-    borderRadius: Radii.thumb,
   },
   receiptList: {
     borderTopWidth: StyleSheet.hairlineWidth,

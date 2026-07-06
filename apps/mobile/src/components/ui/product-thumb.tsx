@@ -21,13 +21,18 @@ export function ProductThumb({ imageUrl, name, size = 48, style }: ProductThumbP
     <View
       style={[
         styles.well,
-        { width: size, height: size, backgroundColor: theme.accentMuted },
+        {
+          width: size,
+          height: size,
+          backgroundColor: theme.backgroundElement,
+          borderColor: theme.border,
+        },
         style,
       ]}>
       {imageUrl ? (
         <Image
           source={imageUrl}
-          contentFit="cover"
+          contentFit="contain"
           transition={Motion.fast}
           style={{ width: size, height: size }}
           accessibilityIgnoresInvertColors
@@ -44,6 +49,7 @@ export function ProductThumb({ imageUrl, name, size = 48, style }: ProductThumbP
 const styles = StyleSheet.create({
   well: {
     borderRadius: Radii.thumb,
+    borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
