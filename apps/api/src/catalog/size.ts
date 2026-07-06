@@ -5,7 +5,7 @@ export interface ParsedSize {
 
 export interface ComparableSize {
   qty: number;
-  unit: "oz" | "ml" | "floz";
+  unit: "oz" | "ml" | "floz" | "ct" | "g";
 }
 
 const unitAliases = new Map<string, string>([
@@ -21,6 +21,12 @@ const unitAliases = new Map<string, string>([
   ["gallon", "gal"],
   ["gallons", "gal"],
   ["gal", "gal"],
+  ["quart", "qt"],
+  ["quarts", "qt"],
+  ["qt", "qt"],
+  ["pint", "pt"],
+  ["pints", "pt"],
+  ["pt", "pt"],
   ["count", "ct"],
   ["counts", "ct"],
   ["ct", "ct"],
@@ -39,6 +45,9 @@ const unitAliases = new Map<string, string>([
   ["gram", "g"],
   ["grams", "g"],
   ["g", "g"],
+  ["kilogram", "kg"],
+  ["kilograms", "kg"],
+  ["kg", "kg"],
 ]);
 
 export function parseSize(sizeRaw: string | null | undefined): ParsedSize | null {
@@ -97,6 +106,26 @@ export function toComparableSize(
 
   if (normalizedUnit === "gal") {
     return { qty: sizeQty * 128, unit: "floz" };
+  }
+
+  if (normalizedUnit === "qt") {
+    return { qty: sizeQty * 32, unit: "floz" };
+  }
+
+  if (normalizedUnit === "pt") {
+    return { qty: sizeQty * 16, unit: "floz" };
+  }
+
+  if (normalizedUnit === "ct") {
+    return { qty: sizeQty, unit: "ct" };
+  }
+
+  if (normalizedUnit === "g") {
+    return { qty: sizeQty, unit: "g" };
+  }
+
+  if (normalizedUnit === "kg") {
+    return { qty: sizeQty * 1_000, unit: "g" };
   }
 
   return null;

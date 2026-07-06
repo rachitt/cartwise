@@ -16,6 +16,71 @@ export function formatProductSize(sizeQty: number | null, sizeUnit: string | nul
   return `${sizeQty} ${sizeUnit}`;
 }
 
+type ComparableUnit = 'oz' | 'fl oz' | 'ct' | 'g' | 'ml';
+
+type ComparableSize = {
+  qty: number;
+  unit: ComparableUnit;
+};
+
+const unitAliases = new Map<string, ComparableUnit | 'lb' | 'gal' | 'qt' | 'pt' | 'l' | 'kg'>([
+  ['ounce', 'oz'],
+  ['ounces', 'oz'],
+  ['oz', 'oz'],
+  ['pound', 'lb'],
+  ['pounds', 'lb'],
+  ['lb', 'lb'],
+  ['lbs', 'lb'],
+  ['fl ounce', 'fl oz'],
+  ['fl ounces', 'fl oz'],
+  ['fl oz', 'fl oz'],
+  ['floz', 'fl oz'],
+  ['fluid ounce', 'fl oz'],
+  ['fluid ounces', 'fl oz'],
+  ['gallon', 'gal'],
+  ['gallons', 'gal'],
+  ['gal', 'gal'],
+  ['quart', 'qt'],
+  ['quarts', 'qt'],
+  ['qt', 'qt'],
+  ['pint', 'pt'],
+  ['pints', 'pt'],
+  ['pt', 'pt'],
+  ['count', 'ct'],
+  ['counts', 'ct'],
+  ['ct', 'ct'],
+  ['each', 'ct'],
+  ['ea', 'ct'],
+  ['gram', 'g'],
+  ['grams', 'g'],
+  ['g', 'g'],
+  ['kilogram', 'kg'],
+  ['kilograms', 'kg'],
+  ['kg', 'kg'],
+  ['milliliter', 'ml'],
+  ['milliliters', 'ml'],
+  ['ml', 'ml'],
+  ['liter', 'l'],
+  ['liters', 'l'],
+  ['l', 'l'],
+]);
+
+export function formatUnitPriceLabel(
+  price: number,
+  sizeQty: number | null,
+  sizeUnit: string | null,
+) {
+  const comparableSize = toComparableSize(sizeQty, sizeUnit);
+  if (!comparableSize || !Number.isFinite(price) || price <= 0) {
+    return null;
+  }
+
+  const basis = unitPriceBasis(comparableSize.unit);
+  const unitPrice = (price / comparableSize.qty) * basis.qty;
+
+  return `${formatPrice(unitPrice)}/${basis.label}`;
+}
+
 const FRESHNESS_UNKNOWN_LABEL = 'freshness unknown';
 
 export function formatRelativeTime(isoDate?: string | null) {
@@ -79,4 +144,49 @@ export function chainLabel(chain: Store['chain']) {
 
 export function storeBadge(store?: Store) {
   return store ? chainLabel(store.chain) : 'Store';
+}
+
+function toComparableSize(
+  sizeQty: number | null,
+  sizeUnit: string | null,
+): ComparableSize | null {
+  if (sizeQty === null || sizeQty <= 0 || !Number.isFinite(sizeQty) || sizeUnit === null) {
+    return null;
+  }
+
+  const normalizedUnit = unitAliases.get(sizeUnit.trim().toLowerCase());
+  switch (normalizedUnit) {
+    case 'oz':
+    case 'fl oz':
+    case 'ct':
+    case 'g':
+    case 'ml':
+      return { qty: sizeQty, unit: normalizedUnit };
+    case 'lb':
+      return { qty: sizeQty * 16, unit: 'oz' };
+    case 'gal':
+      return { qty: sizeQty * 128, unit: 'fl oz' };
+    case 'qt':
+      return { qty: sizeQty * 32, unit: 'fl oz' };
+    case 'pt':
+      return { qty: sizeQty * 16, unit: 'fl oz' };
+    case 'kg':
+      return { qty: sizeQty * 1_000, unit: 'g' };
+    case 'l':
+      return { qty: sizeQty * 1_000, unit: 'ml' };
+    default:
+      return null;
+  }
+}
+
+function unitPriceBasis(unit: ComparableUnit): { qty: number; label: string } {
+  if (unit === 'g') {
+    return { qty: 100, label: '100g' };
+  }
+
+  if (unit === 'ml') {
+    return { qty: 100, label: '100ml' };
+  }
+
+  return { qty: 1, label: unit };
 }

@@ -19,7 +19,13 @@ import { ProductThumb as UiProductThumb } from '@/components/ui/product-thumb';
 import { ReceiptRow } from '@/components/ui/receipt-row';
 import { Motion, Radii, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { chainLabel, effectivePrice, formatPrice, formatProductSize } from '@/lib/price';
+import {
+  chainLabel,
+  effectivePrice,
+  formatPrice,
+  formatProductSize,
+  formatUnitPriceLabel,
+} from '@/lib/price';
 
 const OTHER_BRANDS = 'Other brands';
 const CHEVRON_ICON = {
@@ -275,7 +281,11 @@ function BrandProductCard({
   const storePriceRows = getStorePriceRows(activeStores, result.prices);
   const cheapest = storePriceRows[0] ?? null;
   const cheapestValue = cheapest ? effectivePrice(cheapest.price) : null;
-  const metaLabel = getProductMeta(result.product);
+  const unitPriceLabel =
+    cheapestValue === null
+      ? null
+      : formatUnitPriceLabel(cheapestValue, result.product.sizeQty, result.product.sizeUnit);
+  const metaLabel = getProductMeta(result.product, unitPriceLabel);
 
   return (
     <Animated.View
@@ -318,7 +328,10 @@ function BrandProductCard({
                 capturedAt={price.capturedAt}
                 deltaLabel={index === 0 ? null : `+${formatPrice(delta)}`}
                 highlight={index === 0}
-                meta={formatStoreMeta(store)}
+                meta={formatStoreMeta(
+                  store,
+                  formatUnitPriceLabel(value, result.product.sizeQty, result.product.sizeUnit),
+                )}
                 title={store.name}
                 value={value}
                 wasValue={price.promoPrice !== null ? price.price : null}
@@ -474,17 +487,19 @@ function priceSpread(prices: StorePrice[]) {
   return highest - lowest;
 }
 
-function getProductMeta(product: Product) {
+function getProductMeta(product: Product, unitPriceLabel: string | null) {
   const size = formatProductSize(product.sizeQty, product.sizeUnit);
 
-  return [size, product.category].filter(Boolean).join(' · ') || 'Details unavailable';
+  return [size, product.category, unitPriceLabel ? `best ${unitPriceLabel}` : null]
+    .filter(Boolean)
+    .join(' · ') || 'Details unavailable';
 }
 
-function formatStoreMeta(store: Store) {
+function formatStoreMeta(store: Store, unitPriceLabel: string | null) {
   const distance =
     store.distanceMiles === undefined ? null : `${store.distanceMiles.toFixed(1)} mi`;
 
-  return [chainLabel(store.chain), distance].filter(Boolean).join(' · ');
+  return [chainLabel(store.chain), distance, unitPriceLabel].filter(Boolean).join(' · ');
 }
 
 const styles = StyleSheet.create({
