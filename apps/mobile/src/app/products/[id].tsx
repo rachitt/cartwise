@@ -1,3 +1,4 @@
+import type { Store } from '@cartwise/shared';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
@@ -16,7 +17,13 @@ import { ReceiptRow } from '@/components/ui/receipt-row';
 import { Skeleton } from '@/components/ui/skeleton';
 import { MaxContentWidth, Radii, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { chainLabel, effectivePrice, formatPrice, formatProductSize } from '@/lib/price';
+import {
+  chainLabel,
+  effectivePrice,
+  formatPrice,
+  formatProductSize,
+  formatUnitPriceLabel,
+} from '@/lib/price';
 import { usePreferencesStore } from '@/state/preferences';
 
 const backIcon: SymbolViewProps['name'] = {
@@ -62,6 +69,10 @@ export default function ProductDetailScreen() {
   const product = productQuery.data?.product;
   const size = product ? formatProductSize(product.sizeQty, product.sizeUnit) : null;
   const cheapestPrice = prices[0] ? effectivePrice(prices[0]) : null;
+  const cheapestUnitPrice =
+    product && cheapestPrice !== null
+      ? formatUnitPriceLabel(cheapestPrice, product.sizeQty, product.sizeUnit)
+      : null;
 
   return (
     <ThemedView style={styles.screen}>
@@ -86,7 +97,14 @@ export default function ProductDetailScreen() {
                     {product.name}
                   </ThemedText>
                   <ThemedText type="caption" themeColor="textSecondary" numberOfLines={2}>
-                    {[product.brand, size, product.category].filter(Boolean).join(' · ')}
+                    {[
+                      product.brand,
+                      size,
+                      product.category,
+                      cheapestUnitPrice ? `best ${cheapestUnitPrice}` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
                   </ThemedText>
                   {cartItem ? (
                     <CartQuantityStepper
@@ -113,6 +131,11 @@ export default function ProductDetailScreen() {
                     const store = storeById.get(price.storeId);
                     const currentPrice = effectivePrice(price);
                     const delta = currentPrice - cheapestPrice;
+                    const unitPriceLabel = formatUnitPriceLabel(
+                      currentPrice,
+                      product.sizeQty,
+                      product.sizeUnit,
+                    );
 
                     return (
                       <ReceiptRow
@@ -120,8 +143,8 @@ export default function ProductDetailScreen() {
                         title={store?.name ?? 'Selected store'}
                         meta={
                           store
-                            ? `${chainLabel(store.chain)} · ${formatDistance(store.distanceMiles)} mi`
-                            : chainLabel(price.source)
+                            ? formatStoreMeta(store, unitPriceLabel)
+                            : [chainLabel(price.source), unitPriceLabel].filter(Boolean).join(' · ')
                         }
                         value={currentPrice}
                         wasValue={price.promoPrice !== null ? price.price : null}
@@ -205,6 +228,12 @@ function ProductDetailLoadingState() {
 
 function formatDistance(distanceMiles: number | undefined) {
   return distanceMiles?.toFixed(1) ?? '--';
+}
+
+function formatStoreMeta(store: Store, unitPriceLabel: string | null) {
+  return [chainLabel(store.chain), `${formatDistance(store.distanceMiles)} mi`, unitPriceLabel]
+    .filter(Boolean)
+    .join(' · ');
 }
 
 const styles = StyleSheet.create({
