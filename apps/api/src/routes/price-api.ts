@@ -6,6 +6,7 @@ import { createCache, type Cache, type CacheResult } from "../cache.js";
 import { upsertCollectedProduct } from "../catalog/matcher.js";
 import type { CollectedProduct, Collector } from "../collectors/types.js";
 import type { CartwiseDb, ProductRow } from "../db/repository.js";
+import { compareSearchableProducts, searchRelevanceScore } from "../search/relevance.js";
 
 const CHAINS: ChainSlug[] = ["kroger", "target", "walmart", "aldi"];
 const MAX_STORE_IDS = 40;
@@ -75,6 +76,7 @@ interface ResponseSource {
 interface SearchCacheItem {
   product: Product;
   price: StorePrice | null;
+  relevanceScore: number;
 }
 
 export const priceApiPlugin: FastifyPluginAsync<PriceApiDeps> = async (app, deps) => {
@@ -130,7 +132,10 @@ export const priceApiPlugin: FastifyPluginAsync<PriceApiDeps> = async (app, deps
     }
 
     const stores = await deps.db.getStoresByIds(query.storeIds);
-    const groupedResults = new Map<string, { product: Product; prices: StorePrice[] }>();
+    const groupedResults = new Map<
+      string,
+      { product: Product; prices: StorePrice[]; relevanceScore: number }
+    >();
     const normalizedQuery = normalizeSearchQuery(query.q);
     const sources: ResponseSource[] = [];
 
@@ -145,13 +150,21 @@ export const priceApiPlugin: FastifyPluginAsync<PriceApiDeps> = async (app, deps
         sources,
         store.chainSlug,
         cache,
-        `search:v2:${store.chainSlug}:${store.externalLocationId}:${normalizedQuery}`,
+        `search:v3:${store.chainSlug}:${store.externalLocationId}:${normalizedQuery}`,
         PRODUCTS_TTL_SECONDS,
         async () => {
-          const collectedProducts = await collector.searchProducts(query.q, store.externalLocationId);
+          const collectedProducts = (await collector.searchProducts(query.q, store.externalLocationId))
+            .map(normalizeCollectedProductDates)
+            .filter((product) => searchRelevanceScore(query.q, product) !== null)
+            .sort((left, right) => compareSearchableProducts(query.q, left, right));
           const matchedProducts: SearchCacheItem[] = [];
 
-          for (const collectedProduct of collectedProducts.map(normalizeCollectedProductDates)) {
+          for (const collectedProduct of collectedProducts) {
+            const relevanceScore = searchRelevanceScore(query.q, collectedProduct);
+            if (relevanceScore === null) {
+              continue;
+            }
+
             const matched = await upsertCollectedProduct(
               deps.db,
               collectedProduct,
@@ -161,6 +174,7 @@ export const priceApiPlugin: FastifyPluginAsync<PriceApiDeps> = async (app, deps
             matchedProducts.push({
               product: toProduct(matched.product),
               price: matched.price,
+              relevanceScore,
             });
           }
 
@@ -172,10 +186,18 @@ export const priceApiPlugin: FastifyPluginAsync<PriceApiDeps> = async (app, deps
       }
 
       for (const matched of result.value) {
+        const relevanceScore =
+          matched.relevanceScore ?? searchRelevanceScore(query.q, matched.product);
+        if (relevanceScore === null) {
+          continue;
+        }
+
         const existing = groupedResults.get(matched.product.id) ?? {
           product: matched.product,
           prices: [],
+          relevanceScore,
         };
+        existing.relevanceScore = Math.max(existing.relevanceScore, relevanceScore);
 
         if (matched.price) {
           existing.prices.push(matched.price);
@@ -185,10 +207,20 @@ export const priceApiPlugin: FastifyPluginAsync<PriceApiDeps> = async (app, deps
       }
     }
 
-    const results = Array.from(groupedResults.values()).map((result) => ({
-      product: result.product,
-      prices: sortPrices(result.prices),
-    }));
+    const results = Array.from(groupedResults.values())
+      .map((result) => ({
+        product: result.product,
+        prices: sortPrices(result.prices),
+        relevanceScore: result.relevanceScore,
+      }))
+      .filter((result) => result.prices.length > 0)
+      .sort(
+        (left, right) =>
+          right.relevanceScore - left.relevanceScore ||
+          right.prices.length - left.prices.length ||
+          lowestEffectivePrice(left.prices) - lowestEffectivePrice(right.prices),
+      )
+      .map(({ relevanceScore: _relevanceScore, ...result }) => result);
 
     if (shouldReturnCollectorFailure(sources)) {
       return reply.code(503).send({ error: "Collectors unavailable", sources });
@@ -456,6 +488,14 @@ function sortPrices(prices: StorePrice[]): StorePrice[] {
 
 function effectivePrice(price: StorePrice): number {
   return price.promoPrice ?? price.price;
+}
+
+function lowestEffectivePrice(prices: StorePrice[]): number {
+  if (prices.length === 0) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  return Math.min(...prices.map(effectivePrice));
 }
 
 function normalizeSearchQuery(value: string): string {
