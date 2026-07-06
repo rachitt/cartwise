@@ -1,5 +1,5 @@
 import type { Product, Store, StorePrice } from '@cartwise/shared';
-import type { SearchResult } from '@/api/client';
+import type { ProductMatchSummary, SearchResult } from '@/api/client';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, {
@@ -285,7 +285,7 @@ function BrandProductCard({
     cheapestValue === null
       ? null
       : formatUnitPriceLabel(cheapestValue, result.product.sizeQty, result.product.sizeUnit);
-  const metaLabel = getProductMeta(result.product, unitPriceLabel);
+  const metaLabel = getProductMeta(result.product, unitPriceLabel, result.match);
 
   return (
     <Animated.View
@@ -487,12 +487,32 @@ function priceSpread(prices: StorePrice[]) {
   return highest - lowest;
 }
 
-function getProductMeta(product: Product, unitPriceLabel: string | null) {
+function getProductMeta(
+  product: Product,
+  unitPriceLabel: string | null,
+  match: ProductMatchSummary | undefined,
+) {
   const size = formatProductSize(product.sizeQty, product.sizeUnit);
 
-  return [size, product.category, unitPriceLabel ? `best ${unitPriceLabel}` : null]
+  return [size, product.category, unitPriceLabel ? `best ${unitPriceLabel}` : null, matchLabel(match)]
     .filter(Boolean)
     .join(' · ') || 'Details unavailable';
+}
+
+function matchLabel(match: ProductMatchSummary | undefined) {
+  if (!match || match.confidence === 'unknown') {
+    return null;
+  }
+
+  if (match.confidence === 'exact') {
+    return 'exact match';
+  }
+
+  if (match.confidence === 'mixed') {
+    return 'mixed match';
+  }
+
+  return 'single-store item';
 }
 
 function formatStoreMeta(store: Store, unitPriceLabel: string | null) {
