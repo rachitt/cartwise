@@ -107,6 +107,71 @@ describe("priceApiPlugin collector degradation", () => {
     );
   });
 
+  it("filters broad store candidates to the requested ZIP vicinity", async () => {
+    app = Fastify();
+    const db = fakePriceDb();
+    await app.register(priceApiPlugin, {
+      db,
+      getCollector: (chain: ChainSlug) => {
+        if (chain === "target") {
+          return collectorFor(chain, {
+            stores: [
+              storeCandidate(
+                "target-jersey-city",
+                "Target Jersey City",
+                "07310-1202",
+                40.732336,
+                -74.03572,
+              ),
+              storeCandidate("target-jsq", "Target JSQ", "07306-4240", 40.73116, -74.063601),
+              storeCandidate(
+                "target-north-bergen",
+                "Target North Bergen",
+                "07047-4507",
+                40.801744,
+                -74.021424,
+              ),
+            ],
+          });
+        }
+
+        if (chain === "aldi") {
+          return collectorFor(chain, {
+            stores: [
+              storeCandidate(
+                "aldi-north-bergen",
+                "ALDI North Bergen",
+                "07047",
+                40.7737339,
+                -74.0371728,
+              ),
+              storeCandidate(
+                "aldi-staten-island",
+                "ALDI Staten Island",
+                "10306",
+                40.568999,
+                -74.1090388,
+              ),
+            ],
+          });
+        }
+
+        return null;
+      },
+    });
+
+    const response = await app.inject({ method: "GET", url: "/stores?zip=07310" });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(body.stores.map((store: { name: string }) => store.name)).toEqual([
+      "Target Jersey City",
+      "ALDI North Bergen",
+    ]);
+    expect(body.stores[0].distanceMiles).toBeCloseTo(0, 1);
+    expect(body.stores[1].distanceMiles).toBeLessThan(4);
+  });
+
   it("returns 503 when all configured chains throw with a cold cache", async () => {
     app = Fastify();
     await app.register(priceApiPlugin, {
@@ -321,6 +386,23 @@ function collectorFor(
     async getPrices() {
       return [];
     },
+  };
+}
+
+function storeCandidate(
+  externalLocationId: string,
+  name: string,
+  zip: string,
+  lat: number,
+  lng: number,
+): CollectedStore {
+  return {
+    externalLocationId,
+    name,
+    address: `${name} Address`,
+    zip,
+    lat,
+    lng,
   };
 }
 

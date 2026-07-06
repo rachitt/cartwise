@@ -10,6 +10,7 @@ import { compareSearchableProducts, searchRelevanceScore } from "../search/relev
 
 const CHAINS: ChainSlug[] = ["kroger", "target", "walmart", "aldi"];
 const MAX_STORE_IDS = 40;
+const NEARBY_FALLBACK_RADIUS_MILES = 4;
 const STORES_TTL_SECONDS = 24 * 60 * 60;
 const PRODUCTS_TTL_SECONDS = 6 * 60 * 60;
 
@@ -115,11 +116,13 @@ export const priceApiPlugin: FastifyPluginAsync<PriceApiDeps> = async (app, deps
       }
     }
 
+    const nearbyStores = filterNearbyStores(stores, query.zip);
+
     if (shouldReturnCollectorFailure(sources)) {
       return reply.code(503).send({ error: "Collectors unavailable", sources });
     }
 
-    return { stores, sources };
+    return { stores: nearbyStores, sources };
   });
 
   app.get("/search", async (request, reply) => {
@@ -376,6 +379,94 @@ function toStore(store: {
     lat: store.lat,
     lng: store.lng,
   };
+}
+
+function filterNearbyStores(stores: Store[], zip: string): Store[] {
+  if (stores.length === 0) {
+    return stores;
+  }
+
+  const exactZipStores = stores.filter((store) => firstFiveZip(store.zip) === zip);
+  if (exactZipStores.length === 0) {
+    return stores;
+  }
+
+  const origin = centroid(exactZipStores);
+  const storesByChain = new Map<ChainSlug, Store[]>();
+
+  for (const store of stores.map((store) => withDistance(store, origin))) {
+    storesByChain.set(store.chain, [...(storesByChain.get(store.chain) ?? []), store]);
+  }
+
+  return Array.from(storesByChain.values())
+    .flatMap((chainStores) => {
+      const exactChainStores = chainStores.filter((store) => firstFiveZip(store.zip) === zip);
+      if (exactChainStores.length > 0) {
+        return exactChainStores;
+      }
+
+      return chainStores.filter(
+        (store) =>
+          store.distanceMiles !== undefined &&
+          store.distanceMiles <= NEARBY_FALLBACK_RADIUS_MILES,
+      );
+    })
+    .sort(compareStoresByDistance);
+}
+
+function withDistance(store: Store, origin: { lat: number; lng: number }): Store {
+  return {
+    ...store,
+    distanceMiles: milesBetween(origin, store),
+  };
+}
+
+function centroid(stores: Array<Pick<Store, "lat" | "lng">>): { lat: number; lng: number } {
+  const totals = stores.reduce(
+    (sum, store) => ({
+      lat: sum.lat + store.lat,
+      lng: sum.lng + store.lng,
+    }),
+    { lat: 0, lng: 0 },
+  );
+
+  return {
+    lat: totals.lat / stores.length,
+    lng: totals.lng / stores.length,
+  };
+}
+
+function compareStoresByDistance(left: Store, right: Store): number {
+  return (
+    (left.distanceMiles ?? Number.POSITIVE_INFINITY) -
+      (right.distanceMiles ?? Number.POSITIVE_INFINITY) ||
+    left.chain.localeCompare(right.chain) ||
+    left.name.localeCompare(right.name)
+  );
+}
+
+function milesBetween(
+  left: { lat: number; lng: number },
+  right: { lat: number; lng: number },
+): number {
+  const earthRadiusMiles = 3958.8;
+  const leftLat = degreesToRadians(left.lat);
+  const rightLat = degreesToRadians(right.lat);
+  const deltaLat = degreesToRadians(right.lat - left.lat);
+  const deltaLng = degreesToRadians(right.lng - left.lng);
+  const haversine =
+    Math.sin(deltaLat / 2) ** 2 +
+    Math.cos(leftLat) * Math.cos(rightLat) * Math.sin(deltaLng / 2) ** 2;
+
+  return 2 * earthRadiusMiles * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+}
+
+function degreesToRadians(value: number): number {
+  return (value * Math.PI) / 180;
+}
+
+function firstFiveZip(zip: string): string {
+  return zip.match(/\d{5}/)?.[0] ?? zip;
 }
 
 function toProduct(product: ProductRow): Product {
