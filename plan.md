@@ -12,183 +12,167 @@ The app becomes meaningfully valuable when users trust three things:
 - Prices are fresh, local, and comparable across nearby stores.
 - The cart optimizer explains the cheapest realistic shopping option.
 
-## Success Criteria
+## Strategy: Wedge vs. Moat
 
-- A user can set a location, search a common grocery item, and see clean, relevant, nearby price options.
-- A user can compare equivalent products by unit price, not just sticker price.
-- A user can build a cart and get a ranked store recommendation with savings, missing items, and freshness.
-- Every displayed price includes store, distance, and captured-at context.
-- The app can support repeated weekly use through saved grocery lists and price alerts.
+- **The wedge (what we market):** one killer moment — build a grocery list, get a ranked store answer: "ALDI wins, $18.40 cheaper, missing 2 items." One screen, screenshot-friendly, quantified savings. Everything else is supporting cast.
+- **The moat (what we build):** the data layer under it — cross-store product matching with confidence, fresh local price collection, and honest staleness handling. The optimizer UI is clonable in a weekend; the matching catalog and collector reliability are not.
+- **The flywheel:** demonstrable savings → shareable content → users → "wrong match / stale price" reports → better matching data → more trustworthy answers.
 
-## Phase 1: Make Search Trustworthy
+## Status
 
-Search quality is the highest priority. If the user searches for eggs and gets random grocery noise, the rest of the app loses credibility.
+Shipped to staging:
+
+- Search relevance and result filtering (plan Phase 1) — relevance scoring, normalization, mismatch filtering.
+- Unit price comparison (plan Phase 2) — normalized units, unit price on product and comparison rows.
+- Nearby store filtering (part of the old radius phase).
+- Brand-first search flow, product images, mock data layer removed, mobile UI refresh.
+
+In flight:
+
+- **PR #40 (`codex/match-confidence` → staging):** product match confidence + price row layout fix. This is the core of cross-store matching — land it, then finish the remainder below.
+
+Not started: cart optimizer, trust indicators, radius controls, saved lists, price alerts, all go-to-market work.
+
+## Phase 0: Validate the Marketing Engine (do this week, before heavy build investment)
+
+Every comparable app that worked validated the distribution channel before scaling the build.
 
 ### Work Items
 
-- Improve search relevance scoring so exact item/category matches rank first.
-- Add query normalization for common grocery terms, pluralization, and synonyms.
-- Filter or demote products whose title/category clearly does not match the requested item.
-- Group similar product variants cleanly by brand, size, and pack count.
-- Preserve broad recall only after clearly relevant results have been shown.
+- VSC test: find 10+ TikTok/Reels videos on grocery price comparison / "where I shop to save money"; check for 100K+ views from accounts under 5K followers (content drives reach, not the creator).
+- Read comments on those videos for "what app is this?" intent — that is the convertibility signal.
+- Mine competitor reviews (Flipp, Basket postmortem, store apps, App Store "grocery price compare" results); extract complaints into a feature checklist and content angles.
 
 ### Acceptance Criteria
 
-- Searching `eggs` primarily returns eggs.
-- Searching `milk` primarily returns milk, with clear brand and size labels.
-- Searching `olive oil` does not lead with unrelated oils or pantry items.
-- Results explain enough context for a user to understand what they are comparing.
+- A documented go / no-go: both virality and convertibility signals confirmed before Phases 2+ get major investment.
+- A list of competitor complaints mapped to Cartwise features or content hooks.
 
-## Phase 2: Add Unit Price Comparison
-
-Raw price can be misleading. A cheaper sticker price is not always cheaper value.
+## Phase 1: Finish Cross-Store Matching (completes old Phase 3, after PR #40)
 
 ### Work Items
 
-- Normalize product sizes into comparable units where possible.
-- Support common grocery units: oz, fl oz, lb, count, gallon, quart, pint, liter, each.
-- Calculate unit price for every product with enough size data.
-- Show unit price in product rows and price comparison rows.
-- Add fallbacks for products where size parsing is incomplete.
-
-### Acceptance Criteria
-
-- The app can compare `12 eggs` vs `18 eggs`.
-- The app can compare `1 gal milk` vs `half gal milk`.
-- The app can compare oils, cereal, coffee, and other packaged goods by normalized unit.
-- Unit price never appears when the app cannot calculate it confidently.
-
-## Phase 3: Improve Cross-Store Product Matching
-
-The app should understand comparable products even when stores use different brands or naming.
-
-### Work Items
-
-- Expand the catalog matcher beyond exact UPC/name matches.
-- Use normalized name, category, size, unit, brand, and package count for matching.
+- Expand the catalog matcher beyond exact UPC/name matches using normalized name, category, size, unit, brand, and pack count.
 - Separate exact same-product matches from comparable substitute matches.
-- Add confidence levels for matches.
 - Prevent weak matches from contaminating cart optimization.
 
 ### Acceptance Criteria
 
-- The app can identify equivalent store-brand staples across Kroger, Target, ALDI, and future chains.
-- Product detail screens distinguish exact matches from comparable alternatives.
-- Cart optimization can choose cheaper comparable substitutions only when confidence is high enough.
+- Equivalent store-brand staples identified across Kroger, Target, and ALDI.
+- Product detail distinguishes exact matches from comparable alternatives.
+- Cart optimization only uses substitutions above a confidence threshold.
 
-## Phase 4: Make Whole-Cart Optimization the Main Value
+## Phase 2: Collector Hardening + Trust Indicators (old Phase 5, promoted)
 
-Single-item comparison is useful, but whole-cart savings is the main product.
-
-### Work Items
-
-- Show the cheapest single-store option for the entire cart.
-- Show a split-store option only when savings justify the extra trip.
-- Rank stores by total price, missing items, and distance.
-- Surface why a store won: total price, number of available items, freshness, and travel distance.
-- Clearly show missing items so the user does not trust an incomplete cart blindly.
-
-### Acceptance Criteria
-
-- A finalized cart shows cheapest store, total, savings, and freshness.
-- The user can see which items are missing at each store.
-- Split-store recommendations are not shown unless the savings threshold is meaningful.
-- The optimizer never treats stale or missing prices as real prices.
-
-## Phase 5: Build Trust Indicators Everywhere
-
-Price comparison apps fail when users do not trust the data.
+A broken scraper at launch kills trust permanently. This lands before the optimizer ships publicly.
 
 ### Work Items
 
-- Keep `capturedAt` visible on every price row.
-- Label cached or stale prices honestly.
+- Failure alerting when a collector breaks or serves cache.
+- Keep `capturedAt` visible on every price row; label cached or stale prices honestly.
 - Show store distance everywhere a store price appears.
-- Add source status summaries when a collector fails or cache is served.
-- Consider a simple confidence label for price freshness and product matching.
+- Source status summaries when a collector fails.
+- Constrain launch coverage honestly: 3 chains done well in overlapping metros beats 6 half-working; gate the app to zip codes where coverage is real.
 
 ### Acceptance Criteria
 
-- Every price row has an as-of timestamp.
-- Stale data is visible but not hidden.
-- Collector errors do not create fake confidence.
+- Every price row has an as-of timestamp; stale data visible, never hidden.
+- Collector failures alert the team and never create fake confidence in the UI.
 - Users can tell whether a price is fresh enough to act on.
 
-## Phase 6: Add Store Radius Controls
-
-Savings only matter if the trip is reasonable.
+## Phase 3: The Wedge — Whole-Cart Optimization (old Phase 4 + launch surface)
 
 ### Work Items
 
-- Add a user-controlled store radius: nearby, standard, wider search.
-- Include distance and possible extra-trip cost in optimizer decisions.
-- Let the user prefer single-store shopping or maximum savings.
-- Default to nearby grocery stores for the simplest experience.
+- Cheapest single-store option for the entire cart; split-store only when savings justify the extra trip.
+- Rank stores by total price, missing items, distance; surface why a store won.
+- Clearly show missing items.
+- **Savings receipt:** a shareable "Cartwise saved you $X this week/month" summary card — the recurring content asset and retention hook.
+- **Feedback flywheel:** one-tap "wrong match / stale price" reporting on every price row; reports feed the matching backlog.
 
 ### Acceptance Criteria
 
-- A user can choose how far they are willing to shop.
-- Store candidates change based on that radius.
-- The optimizer does not recommend a far store for tiny savings.
+- A finalized cart shows cheapest store, total, savings, freshness, and missing items on one shareable screen.
+- Split-store recommendations only appear above a meaningful savings threshold.
+- The optimizer never treats stale or missing prices as real.
+- Mis-match reports flow into a reviewable queue.
+
+## Phase 4: Pre-Launch Distribution (parallel with Phase 3)
+
+### Work Items
+
+- Create and warm up TikTok + Instagram accounts (1–2 weeks of activity before posting product content).
+- Waitlist landing page; target a few hundred signups pre-launch.
+- DM outreach to 5–10 micro-influencers in budgeting / frugal-living / couponing niches.
+- Prepare content format candidates: "POV: weekly grocery run" with the app picking the store; receipt-comparison videos; "$X saved this month" recaps. Soft-sell; conversion happens in comments.
+
+### Acceptance Criteria
+
+- Accounts warmed, waitlist live, at least 5 influencer conversations started before launch day.
+
+## Phase 5: Launch + Content Volume
+
+### Work Items
+
+- Launch free (no paywall): priority is installs, App Store reviews, and match-quality feedback.
+- Post 1–3x/day on one channel (short-form video) so attribution stays trivial; iterate hooks until one converts, then remake the winner ~50x; optionally hire UGC creators to copy the format.
+- ASO: target "grocery price comparison" / "compare grocery prices" keywords.
+
+### Acceptance Criteria
+
+- One content format with demonstrated conversion (comment intent + install spikes).
+- Review volume and rating strong enough to serve as the ASO asset.
+
+## Phase 6: Store Radius Controls (remainder of old Phase 6)
+
+### Work Items
+
+- User-controlled radius: nearby, standard, wider.
+- Include distance / extra-trip cost in optimizer decisions; prefer single-store vs. max-savings toggle.
+
+### Acceptance Criteria
+
+- Store candidates change with radius; the optimizer never recommends a far store for tiny savings.
 
 ## Phase 7: Saved Grocery Lists
 
-Saved lists turn Cartwise from a one-off lookup into a recurring shopping tool.
-
 ### Work Items
 
-- Let users save common grocery lists.
-- Let users rerun a saved list against current nearby prices.
-- Add quick-add from prior cart items.
-- Support basic list editing: quantity, remove, reorder, duplicate.
+- Save common lists; rerun a saved list against current nearby prices; quick-add from prior carts; basic editing.
 
 ### Acceptance Criteria
 
-- A user can save a weekly basics list.
-- A user can rerun that list without rebuilding the cart.
-- Saved lists use current prices, not old cart totals.
+- A weekly basics list reruns without rebuilding the cart, using current prices.
 
-## Phase 8: Price Alerts
-
-Alerts should focus on staples and watched products, not noisy promotions.
+## Phase 8: Price Alerts + Monetization (month 3+)
 
 ### Work Items
 
-- Let users watch products or saved-list staples.
-- Trigger alerts when a price drops below a user-defined threshold.
-- Include store, distance, price, prior price, and freshness in the alert.
-- Avoid alert spam through cooldowns and meaningful thresholds.
+- Watch products or saved-list staples; alert below a threshold with store, distance, price, prior price, freshness; cooldowns against spam.
+- **Freemium split:** free = single-item comparison; paid ($3–5/mo or ~$30/yr — users are price-sensitive) = full cart optimizer, price alerts, saved lists. Framing: "a few dollars for hundreds in savings."
+- Longer-term revenue hedge: affiliate / retail-media (store pickup links) so revenue is not solely subscriptions from frugal users.
+- Expand chain coverage based on user zip-code demand, not ambition.
 
 ### Acceptance Criteria
 
-- A user can watch eggs, milk, coffee, detergent, diapers, or other staples.
-- Alerts are actionable and local.
-- Alerts never fire for stale or low-confidence prices.
+- Alerts are actionable, local, and never fire on stale or low-confidence prices.
+- Paywall ships only after content engine and retention are proven.
 
 ## Implementation Priority
 
-1. Search relevance and result filtering.
-2. Unit price normalization.
-3. Cross-store product matching confidence.
-4. Whole-cart optimization UX.
-5. Trust indicators and stale-data handling.
-6. Store radius controls.
-7. Saved grocery lists.
-8. Price alerts.
-
-## Immediate Next Slice
-
-Start with search relevance because it unlocks trust in every downstream workflow.
-
-Recommended first PR:
-
-- Add a search relevance layer in the API after collector results are fetched.
-- Normalize query and product tokens.
-- Score exact title/category matches higher than fuzzy matches.
-- Filter obvious mismatches.
-- Add tests for `eggs`, `milk`, and `olive oil`.
-- Keep the UI flow unchanged unless the backend response shape must expose relevance metadata.
+1. Phase 0 demand validation (this week — cheapest de-risk available).
+2. Land PR #40, finish matching (Phase 1).
+3. Collector hardening + trust indicators (Phase 2).
+4. Cart optimizer wedge + savings receipt + feedback reporting (Phase 3).
+5. Pre-launch distribution (Phase 4, parallel with 3).
+6. Launch + content volume (Phase 5).
+7. Radius, saved lists, alerts + monetization (Phases 6–8).
 
 ## Product Risk
 
 Cartwise only adds significant value if price data is real, fresh, local, and comparable. Mock data or noisy search results cannot power this product. The long-term moat is not just fetching prices; it is turning messy retailer data into a trusted grocery decision.
+
+Two added risks to manage explicitly:
+
+- **Collector fragility:** ALDI guest sessions and Target public APIs can break or block at any time; the product's promise dies when they do. Alerting, honest stale labels, and constrained coverage are the mitigations — treat collector maintenance as a permanent tax, not a one-off.
+- **Price-sensitive monetization:** users are by definition trying to save money. Launch free, monetize only after the savings receipt proves quantified value, and keep the paid price low relative to demonstrated savings.
