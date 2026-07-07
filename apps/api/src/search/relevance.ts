@@ -4,7 +4,7 @@ import type { CollectedProduct } from "../collectors/types.js";
 
 type SearchableProduct = Pick<Product | CollectedProduct, "brand" | "category" | "name">;
 
-const STOP_WORDS = new Set([
+export const SEARCH_STOP_WORDS = new Set([
   "a",
   "an",
   "and",
@@ -63,14 +63,14 @@ const EGG_ALLOW_TOKENS = new Set([
 ]);
 
 export function searchRelevanceScore(query: string, product: SearchableProduct): number | null {
-  const queryTokens = tokenize(query).filter((token) => !STOP_WORDS.has(token));
+  const queryTokens = tokenizeSearchText(query).filter((token) => !SEARCH_STOP_WORDS.has(token));
   if (queryTokens.length === 0) {
     return null;
   }
 
-  const nameTokens = tokenize(product.name);
-  const brandTokens = tokenize(product.brand ?? "");
-  const categoryTokens = tokenize(product.category ?? "");
+  const nameTokens = tokenizeSearchText(product.name);
+  const brandTokens = tokenizeSearchText(product.brand ?? "");
+  const categoryTokens = tokenizeSearchText(product.category ?? "");
   const allTokens = new Set([...nameTokens, ...brandTokens, ...categoryTokens]);
 
   if (!queryTokens.every((token) => allTokens.has(token))) {
@@ -81,8 +81,8 @@ export function searchRelevanceScore(query: string, product: SearchableProduct):
     return null;
   }
 
-  const normalizedName = normalizeText(product.name);
-  const normalizedQuery = normalizeText(query);
+  const normalizedName = normalizeSearchText(product.name);
+  const normalizedQuery = normalizeSearchText(query);
   let score = 0;
 
   if (normalizedName === normalizedQuery) {
@@ -143,14 +143,14 @@ function isRelevantEggProduct(
   return [...tokens].some((token) => EGG_ALLOW_TOKENS.has(token));
 }
 
-function tokenize(value: string): string[] {
-  const normalized = normalizeText(value);
+export function tokenizeSearchText(value: string): string[] {
+  const normalized = normalizeSearchText(value);
   const rawTokens = normalized.match(/[a-z0-9]+/g) ?? [];
 
   return rawTokens.map(stemToken).filter((token) => token.length > 1);
 }
 
-function normalizeText(value: string): string {
+export function normalizeSearchText(value: string): string {
   return value
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")

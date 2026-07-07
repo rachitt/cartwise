@@ -70,6 +70,59 @@ describe("upsertCollectedProduct", () => {
     expect(db.insertedProducts).toEqual([]);
   });
 
+  it("matches unbranded identity products when the existing product already belongs to the chain", async () => {
+    const existing = product("identity-product", {
+      name: "Grade A Large Eggs",
+      brand: null,
+      sizeQty: 12,
+      sizeUnit: "ct",
+    });
+    const db = new FakeCatalogDb([existing]);
+    db.setProductChain(existing.id, "kroger");
+
+    const matched = await upsertCollectedProduct(
+      db,
+      collectedProduct({
+        name: " grade a large eggs ",
+        brand: null,
+        sizeRaw: "12 count",
+      }),
+      "store-1",
+      "kroger",
+    );
+
+    expect(matched.product.id).toBe("identity-product");
+    expect(matched.match).toEqual({ confidence: "exact", method: "identity" });
+    expect(db.insertedProducts).toEqual([]);
+  });
+
+  it("inserts a new product for unbranded identity matches from another chain", async () => {
+    const existing = product("identity-product", {
+      name: "Grade A Large Eggs",
+      brand: null,
+      sizeQty: 12,
+      sizeUnit: "ct",
+    });
+    const db = new FakeCatalogDb([existing]);
+    db.setProductChain(existing.id, "target");
+
+    const matched = await upsertCollectedProduct(
+      db,
+      collectedProduct({
+        name: " grade a large eggs ",
+        brand: null,
+        sizeRaw: "12 count",
+      }),
+      "store-1",
+      "kroger",
+    );
+
+    expect(matched.product.id).toBe("inserted-1");
+    expect(matched.match).toEqual({ confidence: "new", method: "inserted" });
+    expect(db.insertedProducts).toHaveLength(1);
+    expect(db.insertProductOptions).toEqual([{ skipIdentityMerge: true }]);
+  });
+
   it("inserts a canonical product and price snapshot when no match exists", async () => {
     const db = new FakeCatalogDb([]);
 
@@ -116,8 +169,10 @@ describe("upsertCollectedProduct", () => {
 
 class FakeCatalogDb implements CartwiseDb {
   insertedProducts: ProductRow[] = [];
+  insertProductOptions: Array<{ skipIdentityMerge?: boolean } | undefined> = [];
   priceSnapshots: InsertPriceSnapshotInput[] = [];
   private storeProductCounter = 0;
+  private productChains = new Map<string, Set<string>>();
 
   constructor(private readonly products: ProductRow[]) {}
 
@@ -137,7 +192,15 @@ class FakeCatalogDb implements CartwiseDb {
     );
   }
 
-  async insertProduct(input: InsertProductInput): Promise<ProductRow> {
+  async productHasStoreProductForChain(productId: string, chain: string): Promise<boolean> {
+    return this.productChains.get(productId)?.has(chain) ?? false;
+  }
+
+  async insertProduct(
+    input: InsertProductInput,
+    options?: { skipIdentityMerge?: boolean },
+  ): Promise<ProductRow> {
+    this.insertProductOptions.push(options);
     const row = product(`inserted-${this.insertedProducts.length + 1}`, input);
     this.insertedProducts.push(row);
     this.products.push(row);
@@ -261,6 +324,12 @@ class FakeCatalogDb implements CartwiseDb {
 
   async getPushTokenForDevice(): Promise<PushTokenRow | null> {
     throw new Error("not implemented");
+  }
+
+  setProductChain(productId: string, chain: string): void {
+    const chains = this.productChains.get(productId) ?? new Set<string>();
+    chains.add(chain);
+    this.productChains.set(productId, chains);
   }
 }
 

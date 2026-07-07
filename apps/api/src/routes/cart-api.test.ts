@@ -349,6 +349,10 @@ class FakeCartDb implements CartwiseDb {
     throw new Error("not implemented");
   }
 
+  async productHasStoreProductForChain(): Promise<boolean> {
+    throw new Error("not implemented");
+  }
+
   async insertProduct(): Promise<ProductRow> {
     throw new Error("not implemented");
   }

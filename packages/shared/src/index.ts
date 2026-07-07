@@ -36,6 +36,29 @@ export interface StorePrice {
   source: ChainSlug;
 }
 
+export type ProductMatchConfidence = "exact" | "new";
+export type ProductMatchMethod = "upc" | "identity" | "inserted";
+
+export interface ProductMatch {
+  confidence: ProductMatchConfidence;
+  method: ProductMatchMethod;
+}
+
+export interface ProductMatchSummary {
+  confidence: ProductMatchConfidence | "mixed" | "unknown";
+  methods: ProductMatchMethod[];
+}
+
+export type MatchTier = "exact" | "equivalent" | "comparable" | "none";
+
+export interface ProductComparison {
+  tier: MatchTier;
+  confidence: number;
+  reasons: string[];
+}
+
+export const MIN_SWAP_CONFIDENCE = 0.6;
+
 export interface CartItemInput {
   productId: string;
   qty: number;
@@ -55,6 +78,8 @@ export interface SwapSuggestion {
   /** Savings at the winning store if the swap is accepted. */
   savings: number;
   reason: "cheaper-brand" | "better-unit-price";
+  matchTier: MatchTier;
+  matchConfidence: number;
 }
 
 export interface CartOptimization {

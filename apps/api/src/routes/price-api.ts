@@ -1,16 +1,21 @@
-import type { ChainSlug, Product, Store, StorePrice } from "@cartwise/shared";
+import type {
+  ChainSlug,
+  Product,
+  ProductComparison,
+  ProductMatch,
+  ProductMatchMethod,
+  ProductMatchSummary,
+  Store,
+  StorePrice,
+} from "@cartwise/shared";
 import type { FastifyPluginAsync, FastifyReply } from "fastify";
 import { z } from "zod";
 
 import { createCache, type Cache, type CacheResult } from "../cache.js";
-import {
-  upsertCollectedProduct,
-  type ProductMatch,
-  type ProductMatchConfidence,
-  type ProductMatchMethod,
-} from "../catalog/matcher.js";
+import { compareProducts } from "../catalog/compare.js";
+import { upsertCollectedProduct } from "../catalog/matcher.js";
 import type { CollectedProduct, Collector } from "../collectors/types.js";
-import type { CartwiseDb, ProductRow } from "../db/repository.js";
+import type { CartwiseDb, LatestProductStorePriceRow, ProductRow } from "../db/repository.js";
 import { compareSearchableProducts, searchRelevanceScore } from "../search/relevance.js";
 
 const CHAINS: ChainSlug[] = ["kroger", "target", "walmart", "aldi"];
@@ -83,11 +88,6 @@ interface SearchCacheItem {
   price: StorePrice | null;
   relevanceScore: number;
   match?: ProductMatch;
-}
-
-interface ProductMatchSummary {
-  confidence: ProductMatchConfidence | "mixed" | "unknown";
-  methods: ProductMatchMethod[];
 }
 
 export const priceApiPlugin: FastifyPluginAsync<PriceApiDeps> = async (app, deps) => {
@@ -331,9 +331,41 @@ export const priceApiPlugin: FastifyPluginAsync<PriceApiDeps> = async (app, deps
       return reply.code(503).send({ error: "Collectors unavailable", sources });
     }
 
-    return { product: toProduct(product), prices: sortPrices(prices), sources };
+    const comparable = await getComparableProducts(deps.db, product, query.storeIds);
+
+    return { product: toProduct(product), prices: sortPrices(prices), comparable, sources };
   });
 };
+
+async function getComparableProducts(
+  db: CartwiseDb,
+  product: ProductRow,
+  storeIds: string[],
+): Promise<Array<{ product: Product; prices: StorePrice[]; comparison: ProductComparison }>> {
+  if (product.category === null) {
+    return [];
+  }
+
+  const candidates = await db.getAlternativeProductsByCategory(product.category, product.id, storeIds, 10);
+  const scored = candidates
+    .map((candidate) => ({ product: candidate, comparison: compareProducts(product, candidate) }))
+    .filter(({ comparison }) => comparison.tier !== "none")
+    .sort((left, right) => right.comparison.confidence - left.comparison.confidence);
+  const priceRows = await db.getLatestPricesForProducts(
+    scored.map(({ product }) => product.id),
+    storeIds,
+  );
+  const pricesByProduct = groupPricesByProduct(latestRowsToStorePrices(priceRows));
+
+  return scored
+    .map(({ product: comparableProduct, comparison }) => ({
+      product: toProduct(comparableProduct),
+      prices: sortPrices(pricesByProduct.get(comparableProduct.id) ?? []),
+      comparison,
+    }))
+    .filter((result) => result.prices.length > 0)
+    .slice(0, 5);
+}
 
 async function collectWithSource<T>(
   sources: ResponseSource[],
@@ -531,6 +563,35 @@ function toProduct(product: ProductRow): Product {
     category: product.category,
     imageUrl: product.imageUrl,
   };
+}
+
+function groupPricesByProduct(prices: StorePrice[]): Map<string, StorePrice[]> {
+  const grouped = new Map<string, StorePrice[]>();
+
+  for (const price of prices) {
+    const existing = grouped.get(price.productId) ?? [];
+    existing.push(price);
+    grouped.set(price.productId, existing);
+  }
+
+  return grouped;
+}
+
+function latestRowsToStorePrices(rows: LatestProductStorePriceRow[]): StorePrice[] {
+  return rows.flatMap((row) =>
+    row.price && row.price.price !== null
+      ? [
+          {
+            productId: row.productId,
+            storeId: row.storeId,
+            price: row.price.price,
+            promoPrice: row.price.promoPrice,
+            capturedAt: row.price.capturedAt.toISOString(),
+            source: row.price.source,
+          },
+        ]
+      : [],
+  );
 }
 
 function sortPrices(prices: StorePrice[]): StorePrice[] {

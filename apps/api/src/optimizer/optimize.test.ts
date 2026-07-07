@@ -183,8 +183,16 @@ describe("optimizeCart", () => {
       alternatives: {
         original: [
           { product: original, prices: [price("original", "winner", 4)] },
-          { product: storeBrand, prices: [price("store-brand", "winner", 3)] },
-          { product: sameBrand, prices: [price("same-brand", "winner", 3.25)] },
+          {
+            product: storeBrand,
+            prices: [price("store-brand", "winner", 3)],
+            comparison: comparison("comparable", 0.8),
+          },
+          {
+            product: sameBrand,
+            prices: [price("same-brand", "winner", 3.25)],
+            comparison: comparison("equivalent", 0.9),
+          },
         ],
       },
     });
@@ -195,8 +203,43 @@ describe("optimizeCart", () => {
         toProductId: "store-brand",
         savings: 2,
         reason: "cheaper-brand",
+        matchTier: "comparable",
+        matchConfidence: 0.8,
       },
     ]);
+  });
+
+  it("does not suggest a same-category low-confidence product", () => {
+    const original = product("olive-oil", {
+      name: "Olive Oil 16.9 fl oz",
+      category: "cooking oil",
+      sizeQty: 16.9,
+      sizeUnit: "floz",
+    });
+    const lowConfidence = product("canola-oil", {
+      name: "Canola Oil 16.9 fl oz",
+      category: "cooking oil",
+      sizeQty: 16.9,
+      sizeUnit: "floz",
+    });
+
+    const result = optimizeCart({
+      items: [{ productId: "olive-oil", qty: 1 }],
+      stores: [store("winner", "Winner")],
+      prices: [price("olive-oil", "winner", 9), price("canola-oil", "winner", 3)],
+      alternatives: {
+        "olive-oil": [
+          { product: original, prices: [price("olive-oil", "winner", 9)] },
+          {
+            product: lowConfidence,
+            prices: [price("canola-oil", "winner", 3)],
+            comparison: comparison("none", 0.59),
+          },
+        ],
+      },
+    });
+
+    expect(result.swapSuggestions).toEqual([]);
   });
 
   it("skips cross-unit swap comparisons", () => {
@@ -304,4 +347,8 @@ function withOriginals(...products: Product[]): OptimizerInput["alternatives"] {
   return Object.fromEntries(
     products.map((productRow) => [productRow.id, [{ product: productRow, prices: [] }]]),
   );
+}
+
+function comparison(tier: "exact" | "equivalent" | "comparable" | "none", confidence: number) {
+  return { tier, confidence, reasons: [] };
 }

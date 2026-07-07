@@ -1,16 +1,28 @@
-import type { CartOptimization, Product, Store, StorePrice } from '@cartwise/shared';
+import type {
+  CartOptimization,
+  Product,
+  ProductComparison,
+  ProductMatchSummary,
+  Store,
+  StorePrice,
+} from '@cartwise/shared';
 import Constants from 'expo-constants';
 
 import { getDeviceId } from '@/lib/device-id';
 
 export type StoresResponse = { stores: Store[] };
-export type ProductMatchSummary = {
-  confidence: 'exact' | 'new' | 'mixed' | 'unknown';
-  methods: ('upc' | 'identity' | 'inserted')[];
-};
 export type SearchResult = { product: Product; prices: StorePrice[]; match?: ProductMatchSummary };
 export type SearchResponse = { results: SearchResult[] };
-export type ProductPricesResponse = { product: Product; prices: StorePrice[] };
+export type ComparableProductResult = {
+  product: Product;
+  prices: StorePrice[];
+  comparison: ProductComparison;
+};
+export type ProductPricesResponse = {
+  product: Product;
+  prices: StorePrice[];
+  comparable: ComparableProductResult[];
+};
 export type CartStatus = 'open' | 'finalized';
 export type CartItem = { productId: string; qty: number; product: Product };
 export type Cart = { id: string; status: CartStatus; items: CartItem[] };
