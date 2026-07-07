@@ -1,4 +1,12 @@
-import type { CartOptimization, ChainSlug, Product, Store, StorePrice } from '@cartwise/shared';
+import type {
+  CartOptimization,
+  ChainSlug,
+  Product,
+  ProductComparison,
+  ProductMatchSummary,
+  Store,
+  StorePrice,
+} from '@cartwise/shared';
 import Constants from 'expo-constants';
 
 import { getDeviceId } from '@/lib/device-id';
@@ -9,16 +17,18 @@ export type ResponseSource = {
   status: SourceStatus;
   capturedAt?: string;
 };
-export type ProductMatchSummary = {
-  confidence: 'exact' | 'new' | 'mixed' | 'unknown';
-  methods: ('upc' | 'identity' | 'inserted')[];
-};
 export type StoresResponse = { stores: Store[]; sources?: ResponseSource[] };
 export type SearchResult = { product: Product; prices: StorePrice[]; match?: ProductMatchSummary };
 export type SearchResponse = { results: SearchResult[]; sources?: ResponseSource[] };
+export type ComparableProductResult = {
+  product: Product;
+  prices: StorePrice[];
+  comparison: ProductComparison;
+};
 export type ProductPricesResponse = {
   product: Product;
   prices: StorePrice[];
+  comparable: ComparableProductResult[];
   sources?: ResponseSource[];
 };
 export type CoverageResponse = { supported: boolean; chains: ChainSlug[]; storeCount: number };

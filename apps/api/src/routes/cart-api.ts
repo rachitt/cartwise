@@ -1,8 +1,9 @@
-import type { ChainSlug, Product, Store, StorePrice } from "@cartwise/shared";
+import { MIN_SWAP_CONFIDENCE, type ChainSlug, type Product, type Store, type StorePrice } from "@cartwise/shared";
 import type { FastifyPluginAsync, FastifyReply } from "fastify";
 import { z } from "zod";
 
 import { createCache, type Cache } from "../cache.js";
+import { compareProducts } from "../catalog/compare.js";
 import type { CollectedProduct, Collector } from "../collectors/types.js";
 import type {
   CartItemWithProduct,
@@ -197,19 +198,32 @@ async function buildAlternatives(
       item.product.category === null
         ? []
         : await db.getAlternativeProductsByCategory(item.product.category, item.productId, storeIds, 5);
-    const products = [item.product, ...candidates];
+    const scoredCandidates = candidates
+      .map((product) => ({ product, comparison: compareProducts(item.product, product) }))
+      .filter(
+        ({ comparison }) =>
+          comparison.tier !== "none" && comparison.confidence >= MIN_SWAP_CONFIDENCE,
+      );
+    const products = [item.product, ...scoredCandidates.map(({ product }) => product)];
     const priceRows = await db.getLatestPricesForProducts(
       products.map((product) => product.id),
       storeIds,
     );
     const pricesByProduct = groupPricesByProduct(latestRowsToStorePrices(priceRows));
 
-    alternatives[item.productId] = products
-      .map((product) => ({
-        product: toProduct(product),
-        prices: pricesByProduct.get(product.id) ?? [],
-      }))
-      .filter((alternative) => alternative.product.id === item.productId || alternative.prices.length > 0);
+    alternatives[item.productId] = [
+      {
+        product: toProduct(item.product),
+        prices: pricesByProduct.get(item.productId) ?? [],
+      },
+      ...scoredCandidates
+        .map(({ product, comparison }) => ({
+          product: toProduct(product),
+          prices: pricesByProduct.get(product.id) ?? [],
+          comparison,
+        }))
+        .filter((alternative) => alternative.prices.length > 0),
+    ];
   }
 
   return alternatives;

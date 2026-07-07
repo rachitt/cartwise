@@ -1,4 +1,12 @@
-import type { CartOptimization, Product, Store, StorePrice, SwapSuggestion } from "@cartwise/shared";
+import {
+  MIN_SWAP_CONFIDENCE,
+  type CartOptimization,
+  type Product,
+  type ProductComparison,
+  type Store,
+  type StorePrice,
+  type SwapSuggestion,
+} from "@cartwise/shared";
 
 import { toComparableSize } from "../catalog/size.js";
 
@@ -6,7 +14,7 @@ export interface OptimizerInput {
   items: Array<{ productId: string; qty: number }>;
   prices: StorePrice[];
   stores: Store[];
-  alternatives: Record<string, Array<{ product: Product; prices: StorePrice[] }>>;
+  alternatives: Record<string, Array<{ product: Product; prices: StorePrice[]; comparison?: ProductComparison }>>;
 }
 
 export class OptimizerError extends Error {
@@ -210,14 +218,24 @@ function buildSwapSuggestions(
     const originalUnitPrice = moneyToCents(originalPriceValue) / originalSize.qty;
     let best:
       | {
-          toProductId: string;
-          savingsCents: number;
-          reason: SwapSuggestion["reason"];
-        }
-      | null = null;
+        toProductId: string;
+        savingsCents: number;
+        reason: SwapSuggestion["reason"];
+        matchTier: SwapSuggestion["matchTier"];
+        matchConfidence: number;
+      }
+    | null = null;
 
     for (const alternative of alternatives[item.productId] ?? []) {
       if (alternative.product.id === item.productId) {
+        continue;
+      }
+
+      if (
+        !alternative.comparison ||
+        alternative.comparison.tier === "none" ||
+        alternative.comparison.confidence < MIN_SWAP_CONFIDENCE
+      ) {
         continue;
       }
 
@@ -256,6 +274,8 @@ function buildSwapSuggestions(
           toProductId: alternative.product.id,
           savingsCents,
           reason,
+          matchTier: alternative.comparison.tier,
+          matchConfidence: alternative.comparison.confidence,
         };
       }
     }
@@ -266,6 +286,8 @@ function buildSwapSuggestions(
         toProductId: best.toProductId,
         savings: centsToMoney(best.savingsCents),
         reason: best.reason,
+        matchTier: best.matchTier,
+        matchConfidence: best.matchConfidence,
       });
     }
   }

@@ -6,6 +6,7 @@ import { useMemo } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import type { ComparableProductResult } from '@/api/client';
 import { useCurrentCart, useProductPrices, useStores, useUpdateCartItem } from '@/api/queries';
 import { CartQuantityStepper } from '@/components/cart-quantity-stepper';
 import { SourceStatusBanner } from '@/components/source-status-banner';
@@ -13,7 +14,10 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { AppButton } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { Chip } from '@/components/ui/chip';
 import { EmptyState } from '@/components/ui/empty-state';
+import { FreshnessStamp } from '@/components/ui/freshness-stamp';
+import { PriceText } from '@/components/ui/price-text';
 import { ReceiptRow } from '@/components/ui/receipt-row';
 import { Skeleton } from '@/components/ui/skeleton';
 import { MaxContentWidth, Radii, Spacing } from '@/constants/theme';
@@ -66,6 +70,7 @@ export default function ProductDetailScreen() {
       ),
     [productQuery.data?.prices],
   );
+  const comparable = useMemo(() => productQuery.data?.comparable ?? [], [productQuery.data?.comparable]);
 
   const product = productQuery.data?.product;
   const size = product ? formatProductSize(product.sizeQty, product.sizeUnit) : null;
@@ -159,6 +164,22 @@ export default function ProductDetailScreen() {
                   })}
                 </Card>
               </View>
+
+              {comparable.length > 0 ? (
+                <View style={styles.section}>
+                  <ThemedText type="eyebrow">COMPARABLE ALTERNATIVES</ThemedText>
+                  <Card flush>
+                    {comparable.map((alternative, index) => (
+                      <ComparableAlternativeRow
+                        key={alternative.product.id}
+                        alternative={alternative}
+                        showSeparator={index < comparable.length - 1}
+                        storeById={storeById}
+                      />
+                    ))}
+                  </Card>
+                </View>
+              ) : null}
             </>
           )}
         </ScrollView>
@@ -185,6 +206,69 @@ function BackControl() {
         Back
       </ThemedText>
     </Pressable>
+  );
+}
+
+function ComparableAlternativeRow({
+  alternative,
+  showSeparator,
+  storeById,
+}: {
+  alternative: ComparableProductResult;
+  showSeparator: boolean;
+  storeById: Map<string, Store>;
+}) {
+  const theme = useTheme();
+  const bestPrice = [...alternative.prices].sort(
+    (first, second) => effectivePrice(first) - effectivePrice(second),
+  )[0];
+
+  if (!bestPrice) {
+    return null;
+  }
+
+  const value = effectivePrice(bestPrice);
+  const store = storeById.get(bestPrice.storeId);
+  const size = formatProductSize(alternative.product.sizeQty, alternative.product.sizeUnit);
+  const unitPriceLabel = formatUnitPriceLabel(
+    value,
+    alternative.product.sizeQty,
+    alternative.product.sizeUnit,
+  );
+  const meta = [
+    alternative.product.brand,
+    size,
+    store?.name ?? chainLabel(bestPrice.source),
+    unitPriceLabel,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
+  return (
+    <View
+      style={[
+        styles.comparableRow,
+        showSeparator && styles.rowSeparator,
+        showSeparator && { borderBottomColor: theme.border },
+      ]}>
+      <ProductThumb imageUrl={alternative.product.imageUrl} name={alternative.product.name} />
+      <View style={styles.comparableCopy}>
+        <ThemedText type="smallBold" numberOfLines={2}>
+          {alternative.product.name}
+        </ThemedText>
+        <ThemedText type="caption" themeColor="textSecondary" numberOfLines={2}>
+          {meta}
+        </ThemedText>
+        <View style={styles.comparableMetaRow}>
+          <Chip
+            label={alternative.comparison.confidence >= 0.75 ? 'close match' : 'similar'}
+            tone="neutral"
+          />
+          <FreshnessStamp capturedAt={bestPrice.capturedAt} />
+        </View>
+      </View>
+      <PriceText value={value} size="sm" color="accent" />
+    </View>
   );
 }
 
@@ -297,6 +381,28 @@ const styles = StyleSheet.create({
   },
   section: {
     gap: Spacing.two,
+  },
+  comparableRow: {
+    minHeight: 104,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.three,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.three,
+  },
+  comparableCopy: {
+    flex: 1,
+    minWidth: 0,
+    gap: Spacing.one,
+  },
+  comparableMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: Spacing.two,
+  },
+  rowSeparator: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   loadingStack: {
     gap: Spacing.three,

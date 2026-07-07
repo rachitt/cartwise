@@ -1,16 +1,8 @@
-import type { ChainSlug, StorePrice } from "@cartwise/shared";
+import type { ChainSlug, ProductMatch, StorePrice } from "@cartwise/shared";
 
 import type { CollectedProduct } from "../collectors/types.js";
 import type { CartwiseDb, ProductRow, StoreProductRow } from "../db/repository.js";
 import { parseSize } from "./size.js";
-
-export type ProductMatchConfidence = "exact" | "new";
-export type ProductMatchMethod = "upc" | "identity" | "inserted";
-
-export interface ProductMatch {
-  confidence: ProductMatchConfidence;
-  method: ProductMatchMethod;
-}
 
 export interface MatchedCollectedProduct {
   product: ProductRow;
@@ -34,7 +26,12 @@ export async function upsertCollectedProduct(
     sizeUnit: parsedSize?.sizeUnit ?? null,
   };
   const upcProduct = normalizedUpc ? await db.findProductByUpc(normalizedUpc) : null;
-  const identityProduct = upcProduct ? null : await db.findProductByIdentity(identity);
+  const identityCandidate = upcProduct ? null : await db.findProductByIdentity(identity);
+  const acceptsIdentityMatch =
+    identityCandidate !== null &&
+    (identity.brand !== null || (await db.productHasStoreProductForChain(identityCandidate.id, chain)));
+  const identityProduct = acceptsIdentityMatch ? identityCandidate : null;
+  const shouldInsertDistinctProduct = identityCandidate !== null && !acceptsIdentityMatch;
   const match: ProductMatch = upcProduct
     ? { confidence: "exact", method: "upc" }
     : identityProduct
@@ -51,7 +48,7 @@ export async function upsertCollectedProduct(
       upc: normalizedUpc,
       category: normalizeNullable(collected.category),
       imageUrl: normalizeNullable(collected.imageUrl),
-    }));
+    }, { skipIdentityMerge: shouldInsertDistinctProduct }));
 
   const storeProduct = await db.upsertStoreProduct(product.id, storeId, collected.externalProductId);
   const capturedAt = asDate(collected.capturedAt);

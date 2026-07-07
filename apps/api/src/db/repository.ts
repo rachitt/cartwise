@@ -183,7 +183,8 @@ export interface CartwiseDb {
   getProductById(id: string): Promise<ProductRow | null>;
   findProductByUpc(upc: string): Promise<ProductRow | null>;
   findProductByIdentity(identity: FindProductIdentity): Promise<ProductRow | null>;
-  insertProduct(input: InsertProductInput): Promise<ProductRow>;
+  productHasStoreProductForChain(productId: string, chain: ChainSlug): Promise<boolean>;
+  insertProduct(input: InsertProductInput, options?: { skipIdentityMerge?: boolean }): Promise<ProductRow>;
   upsertStoreProduct(
     productId: string,
     storeId: string,
@@ -313,7 +314,21 @@ class DrizzleCartwiseDb implements CartwiseDb {
     return (row as ProductRow | undefined) ?? null;
   }
 
-  async insertProduct(input: InsertProductInput): Promise<ProductRow> {
+  async productHasStoreProductForChain(productId: string, chain: ChainSlug): Promise<boolean> {
+    const [row] = await drizzleDb
+      .select({ id: storeProducts.id })
+      .from(storeProducts)
+      .innerJoin(stores, eq(stores.id, storeProducts.storeId))
+      .where(and(eq(storeProducts.productId, productId), eq(stores.chainSlug, chain)))
+      .limit(1);
+
+    return row !== undefined;
+  }
+
+  async insertProduct(
+    input: InsertProductInput,
+    options: { skipIdentityMerge?: boolean } = {},
+  ): Promise<ProductRow> {
     if (input.upc) {
       const [inserted] = await drizzleDb
         .insert(products)
@@ -331,6 +346,11 @@ class DrizzleCartwiseDb implements CartwiseDb {
       }
 
       throw new Error("Product UPC conflict could not be resolved");
+    }
+
+    if (options.skipIdentityMerge) {
+      const [row] = await drizzleDb.insert(products).values(input).returning();
+      return row as ProductRow;
     }
 
     return drizzleDb.transaction(async (tx) => {

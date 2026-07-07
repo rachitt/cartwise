@@ -4,7 +4,12 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { createCache, type CacheDb } from "../cache.js";
 import type { CollectedProduct, Collector, CollectedStore } from "../collectors/types.js";
-import type { CacheEntry, CartwiseDb } from "../db/repository.js";
+import type {
+  CacheEntry,
+  CartwiseDb,
+  LatestProductStorePriceRow,
+  ProductRow,
+} from "../db/repository.js";
 import { priceApiPlugin } from "./price-api.js";
 
 describe("priceApiPlugin validation", () => {
@@ -401,6 +406,88 @@ describe("priceApiPlugin collector degradation", () => {
     expect(db.snapshotInserts).toBe(0);
   });
 
+  it("returns comparable alternatives from latest stored snapshots", async () => {
+    const now = new Date("2026-07-04T12:00:00Z");
+    const productId = "00000000-0000-4000-8000-000000000001";
+    const comparableProductId = "00000000-0000-4000-8000-000000000002";
+    const storeId = "10000000-0000-4000-8000-000000000001";
+    const externalProductId = "external-product-1";
+    const product = productRow(productId, {
+      name: "Cheerios 18 oz",
+      brand: "Cheerios",
+      sizeQty: 18,
+      sizeUnit: "oz",
+      category: "cereal",
+    });
+    const comparableProduct = productRow(comparableProductId, {
+      name: "Cheerios Cereal 18 oz",
+      brand: "Cheerios",
+      sizeQty: 18,
+      sizeUnit: "oz",
+      category: "cereal",
+    });
+    const db = fakeProductPricesDb({
+      productId,
+      storeId,
+      externalProductId,
+      product,
+      alternatives: [comparableProduct],
+      latestRows: [
+        latestPriceRow(comparableProduct, storeId, {
+          price: 4.49,
+          capturedAt: new Date("2026-07-04T10:30:00Z"),
+        }),
+      ],
+      cachedProducts: [
+        {
+          externalProductId,
+          name: "Cheerios 18 oz",
+          brand: "Cheerios",
+          sizeRaw: "18 oz",
+          upc: null,
+          category: "cereal",
+          imageUrl: null,
+          price: 4.99,
+          promoPrice: null,
+          capturedAt: new Date("2026-07-04T11:55:00Z"),
+        },
+      ],
+      now,
+    });
+    app = Fastify();
+    await app.register(priceApiPlugin, {
+      db,
+      getCollector: () => throwingCollector("kroger"),
+      cache: createCache(db, () => now),
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/products/${productId}/prices?storeIds=${storeId}`,
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().comparable).toEqual([
+      {
+        product: comparableProduct,
+        prices: [
+          {
+            storeId,
+            productId: comparableProductId,
+            price: 4.49,
+            promoPrice: null,
+            capturedAt: "2026-07-04T10:30:00.000Z",
+            source: "kroger",
+          },
+        ],
+        comparison: expect.objectContaining({
+          tier: "equivalent",
+          confidence: expect.any(Number),
+        }),
+      },
+    ]);
+  });
+
   it("filters off-intent retailer products from search before matching", async () => {
     const storeId = "10000000-0000-4000-8000-000000000001";
     const db = fakeSearchDb(storeId);
@@ -581,6 +668,9 @@ function fakeProductPricesDb(input: {
   productId: string;
   storeId: string;
   externalProductId: string;
+  product?: ProductRow;
+  alternatives?: ProductRow[];
+  latestRows?: LatestProductStorePriceRow[];
   cachedProducts: CollectedProduct[];
   now: Date;
 }): CartwiseDb & CacheDb & { snapshotInserts: number } {
@@ -594,16 +684,20 @@ function fakeProductPricesDb(input: {
     lat: 39.1,
     lng: -84.5,
   };
-  const product = {
-    id: input.productId,
-    name: "Milk",
-    brand: "Store",
-    sizeQty: 1,
-    sizeUnit: "gal",
-    upc: null,
-    category: "dairy",
-    imageUrl: null,
-  };
+  const product: ProductRow =
+    input.product ??
+    {
+      id: input.productId,
+      name: "Milk",
+      brand: "Store",
+      sizeQty: 1,
+      sizeUnit: "gal",
+      upc: null,
+      category: "dairy",
+      imageUrl: null,
+    };
+  const alternatives = input.alternatives ?? [];
+  const latestRows = input.latestRows ?? [];
   const cacheKey = `price:kroger:${store.externalLocationId}:${input.externalProductId}`;
   const cacheEntries = new Map<string, CacheEntry>([
     [
@@ -646,6 +740,21 @@ function fakeProductPricesDb(input: {
       this.snapshotInserts += 1;
       throw new Error("Snapshot insert should not be called on a cache hit");
     },
+    async getAlternativeProductsByCategory(
+      category: string,
+      excludeProductId: string,
+      _storeIds: string[],
+      limit: number,
+    ) {
+      return alternatives
+        .filter((alternative) => alternative.category === category && alternative.id !== excludeProductId)
+        .slice(0, limit);
+    },
+    async getLatestPricesForProducts(productIds: string[], storeIds: string[]) {
+      return latestRows.filter(
+        (row) => productIds.includes(row.productId) && storeIds.includes(row.storeId),
+      );
+    },
   };
 
   const proxied = new Proxy(target, {
@@ -661,6 +770,55 @@ function fakeProductPricesDb(input: {
   });
 
   return proxied as unknown as CartwiseDb & CacheDb & { snapshotInserts: number };
+}
+
+function productRow(id: string, overrides: Partial<ProductRow> = {}): ProductRow {
+  return {
+    id,
+    name: "Product",
+    brand: "Brand",
+    sizeQty: 12,
+    sizeUnit: "oz",
+    upc: null,
+    category: "category",
+    imageUrl: null,
+    ...overrides,
+  };
+}
+
+function latestPriceRow(
+  product: ProductRow,
+  storeId: string,
+  overrides: Partial<NonNullable<LatestProductStorePriceRow["price"]>> = {},
+): LatestProductStorePriceRow {
+  const store = {
+    id: storeId,
+    chainSlug: "kroger" as const,
+    externalLocationId: `external-${storeId}`,
+    name: "Kroger",
+    address: "1 Main St",
+    zip: "45202",
+    lat: 39.1,
+    lng: -84.5,
+  };
+  const storeProductId = `store-product-${product.id}-${storeId}`;
+
+  return {
+    productId: product.id,
+    storeId,
+    storeProductId,
+    externalProductId: `external-${product.id}-${storeId}`,
+    store,
+    price: {
+      id: `price-${product.id}-${storeId}`,
+      storeProductId,
+      price: 2.99,
+      promoPrice: null,
+      capturedAt: new Date("2026-07-04T12:00:00Z"),
+      source: "kroger",
+      ...overrides,
+    },
+  };
 }
 
 function fakeSearchDb(storeId: string): CartwiseDb & CacheDb & { insertedProductNames: string[] } {

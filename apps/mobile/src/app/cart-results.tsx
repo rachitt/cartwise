@@ -185,7 +185,10 @@ export default function CartResultsScreen() {
                         {fromProduct?.name ?? formatProductId(suggestion.fromProductId)} →{' '}
                         {formatProductId(suggestion.toProductId)}
                       </ThemedText>
-                      <Chip label={reasonLabel[suggestion.reason]} tone="neutral" />
+                      <View style={styles.swapChipRow}>
+                        <Chip label={reasonLabel[suggestion.reason]} tone="neutral" />
+                        <Chip label={formatSwapMatchLabel(suggestion)} tone="neutral" />
+                      </View>
                     </View>
                     <Chip label={`Save ${formatPrice(suggestion.savings)}`} tone="deal" />
                   </Card>
@@ -425,6 +428,17 @@ function formatProductId(productId: string) {
     .join(' ');
 }
 
+function formatSwapMatchLabel(suggestion: CartOptimization['swapSuggestions'][number]) {
+  const tierLabel =
+    suggestion.matchTier === 'exact'
+      ? 'exact match'
+      : suggestion.matchTier === 'equivalent'
+        ? 'close match'
+        : 'similar';
+
+  return `${tierLabel} · ${Math.round(suggestion.matchConfidence * 100)}%`;
+}
+
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
@@ -506,6 +520,11 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
     gap: Spacing.two,
+  },
+  swapChipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.one,
   },
   emptySwapsText: {
     paddingVertical: Spacing.one,

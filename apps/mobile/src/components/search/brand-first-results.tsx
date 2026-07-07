@@ -1,5 +1,5 @@
 import type { Product, Store, StorePrice } from '@cartwise/shared';
-import type { ProductMatchSummary, SearchResult } from '@/api/client';
+import type { SearchResult } from '@/api/client';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, {
@@ -286,7 +286,7 @@ function BrandProductCard({
       ? null
       : formatUnitPriceLabel(cheapestValue, result.product.sizeQty, result.product.sizeUnit);
   const metaLabel = getProductMeta(result.product, unitPriceLabel);
-  const productMatchLabel = matchLabel(result.match);
+  const productMatchLabel = matchLabel(result);
 
   return (
     <Animated.View
@@ -499,20 +499,12 @@ function getProductMeta(product: Product, unitPriceLabel: string | null) {
     .join(' · ') || 'Details unavailable';
 }
 
-function matchLabel(match: ProductMatchSummary | undefined) {
-  if (!match || match.confidence === 'unknown') {
+function matchLabel(result: SearchResult) {
+  if (!result.match || result.match.confidence === 'unknown' || result.prices.length < 2) {
     return null;
   }
 
-  if (match.confidence === 'exact') {
-    return 'exact match';
-  }
-
-  if (match.confidence === 'mixed') {
-    return 'mixed match';
-  }
-
-  return 'single-store item';
+  return `same item · ${result.prices.length} stores`;
 }
 
 function formatStoreMeta(store: Store, unitPriceLabel: string | null) {
