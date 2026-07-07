@@ -9,7 +9,7 @@ import {
   useCreateCart,
   useCurrentCart,
   useFinalizeCart,
-  useStores,
+  useNearbyStores,
   useUpdateCartItem,
 } from '@/api/queries';
 import { CartQuantityStepper } from '@/components/cart/cart-quantity-stepper';
@@ -41,7 +41,7 @@ const CART_ICON = {
 export default function CartScreen() {
   const zip = usePreferencesStore((state) => state.zip);
   const cartQuery = useCurrentCart();
-  const storesQuery = useStores(zip);
+  const storesQuery = useNearbyStores(zip);
   const updateCartItem = useUpdateCartItem();
   const finalizeCart = useFinalizeCart();
   const createCart = useCreateCart();
@@ -76,8 +76,7 @@ export default function CartScreen() {
             <ThemedText type="eyebrow">CARTWISE</ThemedText>
             <ThemedText type="display">Cart</ThemedText>
             <ThemedText type="small" themeColor="textSecondary">
-              {formatCount(itemCount, 'item')} · compared across{' '}
-              {formatCount(activeStores.length, 'store')}
+              {formatCount(itemCount, 'item')} · {formatCount(activeStores.length, 'nearby store')}
             </ThemedText>
           </View>
 
@@ -145,7 +144,7 @@ export default function CartScreen() {
           ) : null}
 
           <AppButton
-            label="Find my cheapest store"
+            label="Find my store"
             size="lg"
             haptic="success"
             loading={finalizeCart.isPending}

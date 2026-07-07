@@ -85,7 +85,7 @@ function selectedSourceStatuses(sources: ResponseSource[] | null | undefined, st
 
 function formatChainList(chains: string[]) {
   if (chains.length <= 1) {
-    return chains[0] ?? 'Selected stores';
+    return chains[0] ?? 'Nearby stores';
   }
 
   if (chains.length === 2) {

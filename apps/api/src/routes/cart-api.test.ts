@@ -103,11 +103,37 @@ describe("cartApiPlugin", () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({
+    const body = response.json();
+    expect(body).toMatchObject({
       winningStoreId: storeOneId,
       winningTotal: 4,
       worstTotal: 7,
       savings: 3,
+    });
+    expect(body.perStoreTotals[0]).toMatchObject({
+      storeId: storeOneId,
+      total: 4,
+      missingItems: [],
+      coveredItemCount: 2,
+      itemCount: 2,
+      substitutionCount: 0,
+      pricesAsOf: "2026-07-04T12:00:00.000Z",
+      lines: [
+        {
+          productId: milkId,
+          qty: 1,
+          unitPrice: 2,
+          lineTotal: 2,
+          capturedAt: "2026-07-04T12:00:00.000Z",
+        },
+        {
+          productId: breadId,
+          qty: 2,
+          unitPrice: 1,
+          lineTotal: 2,
+          capturedAt: "2026-07-04T12:00:00.000Z",
+        },
+      ],
     });
     expect(db.carts[0]?.status).toBe("finalized");
   });

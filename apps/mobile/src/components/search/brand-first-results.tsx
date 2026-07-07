@@ -1,4 +1,4 @@
-import type { Product, Store, StorePrice } from '@cartwise/shared';
+import type { Product } from '@cartwise/shared';
 import type { SearchResult } from '@/api/client';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { Pressable, StyleSheet, View } from 'react-native';
@@ -14,18 +14,10 @@ import { ThemedText } from '@/components/themed-text';
 import { AppButton } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Chip } from '@/components/ui/chip';
-import { PriceText } from '@/components/ui/price-text';
 import { ProductThumb as UiProductThumb } from '@/components/ui/product-thumb';
-import { ReceiptRow } from '@/components/ui/receipt-row';
 import { Motion, Radii, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import {
-  chainLabel,
-  effectivePrice,
-  formatPrice,
-  formatProductSize,
-  formatUnitPriceLabel,
-} from '@/lib/price';
+import { formatProductSize } from '@/lib/price';
 
 const OTHER_BRANDS = 'Other brands';
 const CHEVRON_ICON = {
@@ -40,7 +32,6 @@ const BACK_ICON = {
 } satisfies SymbolViewProps['name'];
 
 type BrandFirstSearchResultsProps = {
-  activeStores: Store[];
   disabled: boolean;
   qtyByProductId: ReadonlyMap<string, number>;
   results: SearchResult[];
@@ -54,20 +45,12 @@ type BrandGroup = {
   name: string;
   products: SearchResult[];
   productCount: number;
-  lowestPrice: number;
-  maxSavings: number;
-  storeCount: number;
   thumbnailProduct: Product;
   isOther: boolean;
-};
-
-type StorePriceRow = {
-  store: Store;
-  price: StorePrice;
+  firstResultIndex: number;
 };
 
 export function BrandFirstSearchResults({
-  activeStores,
   disabled,
   qtyByProductId,
   results,
@@ -111,7 +94,6 @@ export function BrandFirstSearchResults({
       layout={layoutTransition}
       style={styles.stage}>
       <BrandDetail
-        activeStores={activeStores}
         brandGroup={selectedGroup}
         disabled={disabled}
         qtyByProductId={qtyByProductId}
@@ -165,7 +147,6 @@ function BrandRow({
   const theme = useTheme();
   const displayName = formatDisplayName(brand.name);
   const productLabel = `${brand.productCount} ${brand.productCount === 1 ? 'product' : 'products'}`;
-  const storeLabel = `${brand.storeCount} ${brand.storeCount === 1 ? 'store' : 'stores'}`;
 
   return (
     <View
@@ -185,17 +166,8 @@ function BrandRow({
             {displayName}
           </ThemedText>
           <ThemedText type="caption" themeColor="textSecondary" numberOfLines={1}>
-            {productLabel} · {storeLabel}
+            {productLabel}
           </ThemedText>
-          {brand.storeCount >= 2 && brand.maxSavings > 0 ? (
-            <Chip label={`Saves ${formatPrice(brand.maxSavings)}`} tone="deal" />
-          ) : null}
-        </View>
-        <View style={styles.brandPriceBlock}>
-          <ThemedText type="caption" themeColor="textSecondary">
-            from
-          </ThemedText>
-          <PriceText value={brand.lowestPrice} size="sm" color="accent" />
         </View>
         <SymbolView name={CHEVRON_ICON} tintColor={theme.textSecondary} size={15} weight="semibold" />
       </Pressable>
@@ -204,14 +176,12 @@ function BrandRow({
 }
 
 function BrandDetail({
-  activeStores,
   brandGroup,
   disabled,
   qtyByProductId,
   onBackToBrands,
   onChangeQty,
 }: {
-  activeStores: Store[];
   brandGroup: BrandGroup;
   disabled: boolean;
   qtyByProductId: ReadonlyMap<string, number>;
@@ -242,8 +212,7 @@ function BrandDetail({
             {formatDisplayName(brandGroup.name)}
           </ThemedText>
           <ThemedText type="caption" themeColor="textSecondary">
-            {brandGroup.productCount} {brandGroup.productCount === 1 ? 'product' : 'products'} · from{' '}
-            {formatPrice(brandGroup.lowestPrice)}
+            {brandGroup.productCount} {brandGroup.productCount === 1 ? 'product' : 'products'}
           </ThemedText>
         </View>
       </View>
@@ -251,7 +220,6 @@ function BrandDetail({
         {brandGroup.products.map((result) => (
           <BrandProductCard
             key={result.product.id}
-            activeStores={activeStores}
             disabled={disabled}
             qty={qtyByProductId.get(result.product.id) ?? 0}
             result={result}
@@ -264,28 +232,18 @@ function BrandDetail({
 }
 
 function BrandProductCard({
-  activeStores,
   disabled,
   qty,
   result,
   onChangeQty,
 }: {
-  activeStores: Store[];
   disabled: boolean;
   qty: number;
   result: SearchResult;
   onChangeQty: (qty: number) => void;
 }) {
-  const theme = useTheme();
   const reducedMotion = useReducedMotion();
-  const storePriceRows = getStorePriceRows(activeStores, result.prices);
-  const cheapest = storePriceRows[0] ?? null;
-  const cheapestValue = cheapest ? effectivePrice(cheapest.price) : null;
-  const unitPriceLabel =
-    cheapestValue === null
-      ? null
-      : formatUnitPriceLabel(cheapestValue, result.product.sizeQty, result.product.sizeUnit);
-  const metaLabel = getProductMeta(result.product, unitPriceLabel);
+  const metaLabel = getProductMeta(result.product);
   const productMatchLabel = matchLabel(result);
 
   return (
@@ -320,28 +278,6 @@ function BrandProductCard({
               onChange={onChangeQty}
             />
           </View>
-        </View>
-        <View style={[styles.receiptList, { borderTopColor: theme.border }]}>
-          {storePriceRows.map(({ store, price }, index) => {
-            const value = effectivePrice(price);
-            const delta = cheapestValue === null ? 0 : value - cheapestValue;
-
-            return (
-              <ReceiptRow
-                key={`${result.product.id}-${store.id}`}
-                capturedAt={price.capturedAt}
-                deltaLabel={index === 0 ? null : `+${formatPrice(delta)}`}
-                highlight={index === 0}
-                meta={formatStoreMeta(
-                  store,
-                  formatUnitPriceLabel(value, result.product.sizeQty, result.product.sizeUnit),
-                )}
-                title={store.name}
-                value={value}
-                wasValue={price.promoPrice !== null ? price.price : null}
-              />
-            );
-          })}
         </View>
       </Card>
     </Animated.View>
@@ -386,8 +322,9 @@ function AddToCartControl({
 
 function groupSearchResultsByBrand(results: SearchResult[]) {
   const resultsByBrand = new Map<string, SearchResult[]>();
+  const firstIndexByBrand = new Map<string, number>();
 
-  results.forEach((result) => {
+  results.forEach((result, index) => {
     if (result.prices.length === 0) {
       return;
     }
@@ -397,13 +334,14 @@ function groupSearchResultsByBrand(results: SearchResult[]) {
 
     brandResults.push(result);
     resultsByBrand.set(brandName, brandResults);
+    if (!firstIndexByBrand.has(brandName)) {
+      firstIndexByBrand.set(brandName, index);
+    }
   });
 
   return Array.from(resultsByBrand.entries())
     .map(([name, brandResults]) => {
-      const products = [...brandResults].sort(compareSearchResults);
-      const allPrices = products.flatMap((result) => result.prices);
-      const storeIds = new Set(allPrices.map((price) => price.storeId));
+      const products = [...brandResults];
       const thumbnailProduct =
         brandResults.find((result) => result.product.imageUrl !== null)?.product ??
         brandResults[0].product;
@@ -412,11 +350,9 @@ function groupSearchResultsByBrand(results: SearchResult[]) {
         name,
         products,
         productCount: products.length,
-        lowestPrice: lowestEffectivePrice(allPrices),
-        maxSavings: Math.max(0, ...products.map((result) => priceSpread(result.prices))),
-        storeCount: storeIds.size,
         thumbnailProduct,
         isOther: name === OTHER_BRANDS,
+        firstResultIndex: firstIndexByBrand.get(name) ?? Number.POSITIVE_INFINITY,
       };
     })
     .sort(compareBrandGroups);
@@ -447,71 +383,25 @@ function compareBrandGroups(first: BrandGroup, second: BrandGroup) {
     return first.isOther ? 1 : -1;
   }
 
-  return first.lowestPrice - second.lowestPrice || first.name.localeCompare(second.name);
+  return first.firstResultIndex - second.firstResultIndex || first.name.localeCompare(second.name);
 }
 
-function compareSearchResults(first: SearchResult, second: SearchResult) {
-  return (
-    lowestEffectivePrice(first.prices) - lowestEffectivePrice(second.prices) ||
-    first.product.name.localeCompare(second.product.name)
-  );
-}
-
-function getStorePriceRows(stores: Store[], prices: StorePrice[]): StorePriceRow[] {
-  const storeById = new Map(stores.map((store) => [store.id, store]));
-
-  return prices
-    .map((price) => {
-      const store = storeById.get(price.storeId);
-      return store ? { store, price } : null;
-    })
-    .filter((row): row is StorePriceRow => row !== null)
-    .sort((first, second) => effectivePrice(first.price) - effectivePrice(second.price));
-}
-
-function lowestEffectivePrice(prices: StorePrice[]) {
-  return Math.min(...prices.map(effectivePrice));
-}
-
-function priceSpread(prices: StorePrice[]) {
-  if (prices.length < 2) {
-    return 0;
-  }
-
-  let lowest = Number.POSITIVE_INFINITY;
-  let highest = Number.NEGATIVE_INFINITY;
-
-  prices.forEach((price) => {
-    const priceValue = effectivePrice(price);
-
-    lowest = Math.min(lowest, priceValue);
-    highest = Math.max(highest, priceValue);
-  });
-
-  return highest - lowest;
-}
-
-function getProductMeta(product: Product, unitPriceLabel: string | null) {
+function getProductMeta(product: Product) {
   const size = formatProductSize(product.sizeQty, product.sizeUnit);
 
-  return [size, product.category, unitPriceLabel ? `best ${unitPriceLabel}` : null]
-    .filter(Boolean)
-    .join(' · ') || 'Details unavailable';
+  return [product.brand, size].filter(Boolean).join(' · ') || 'Details unavailable';
 }
 
 function matchLabel(result: SearchResult) {
-  if (!result.match || result.match.confidence === 'unknown' || result.prices.length < 2) {
+  if (!result.match || result.match.confidence === 'unknown') {
     return null;
   }
 
-  return `same item · ${result.prices.length} stores`;
-}
+  if (result.match.confidence === 'mixed') {
+    return 'matched';
+  }
 
-function formatStoreMeta(store: Store, unitPriceLabel: string | null) {
-  const distance =
-    store.distanceMiles === undefined ? null : `${store.distanceMiles.toFixed(1)} mi`;
-
-  return [chainLabel(store.chain), distance, unitPriceLabel].filter(Boolean).join(' · ');
+  return result.match.confidence === 'exact' ? 'same item' : 'new item';
 }
 
 const styles = StyleSheet.create({
@@ -546,10 +436,6 @@ const styles = StyleSheet.create({
     minWidth: 0,
     gap: Spacing.half,
   },
-  brandPriceBlock: {
-    minWidth: 58,
-    alignItems: 'flex-end',
-  },
   detailHeader: {
     gap: Spacing.two,
   },
@@ -569,7 +455,7 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
   },
   productCard: {
-    gap: Spacing.three,
+    gap: Spacing.two,
   },
   productHeader: {
     minHeight: 56,
@@ -588,11 +474,6 @@ const styles = StyleSheet.create({
   productAction: {
     flexShrink: 0,
     alignItems: 'flex-end',
-  },
-  receiptList: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    gap: Spacing.one,
-    paddingTop: Spacing.two,
   },
   addButton: {
     minWidth: 64,

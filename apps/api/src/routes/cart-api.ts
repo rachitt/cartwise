@@ -27,6 +27,51 @@ const itemBodySchema = z.object({
 const finalizeBodySchema = z.object({
   storeIds: z.array(z.string().uuid()).min(1).max(MAX_FINALIZE_STORE_IDS),
 });
+const billLineResponseSchema = z.object({
+  productId: z.string(),
+  substitutedProductId: z.string().optional(),
+  substitutedProductName: z.string().optional(),
+  qty: z.number().int().min(1),
+  unitPrice: z.number().nonnegative(),
+  lineTotal: z.number().nonnegative(),
+  capturedAt: z.string().datetime(),
+});
+const storeTotalResponseSchema = z.object({
+  storeId: z.string(),
+  total: z.number().nonnegative(),
+  missingItems: z.array(z.string()),
+  lines: z.array(billLineResponseSchema),
+  pricesAsOf: z.string().datetime(),
+  coveredItemCount: z.number().int().nonnegative(),
+  itemCount: z.number().int().nonnegative(),
+  substitutionCount: z.number().int().nonnegative(),
+});
+const cartOptimizationResponseSchema = z.object({
+  winningStoreId: z.string(),
+  winningTotal: z.number().nonnegative(),
+  worstTotal: z.number().nonnegative(),
+  savings: z.number().nonnegative(),
+  perStoreTotals: z.array(storeTotalResponseSchema),
+  cheaperElsewhere: z.array(
+    z.object({
+      productId: z.string(),
+      storeId: z.string(),
+      price: z.number().nonnegative(),
+      delta: z.number().nonnegative(),
+    }),
+  ),
+  swapSuggestions: z.array(
+    z.object({
+      fromProductId: z.string(),
+      toProductId: z.string(),
+      savings: z.number().nonnegative(),
+      reason: z.enum(["cheaper-brand", "better-unit-price"]),
+      matchTier: z.enum(["exact", "equivalent", "comparable", "none"]),
+      matchConfidence: z.number().min(0).max(1),
+    }),
+  ),
+  pricesAsOf: z.string().datetime(),
+});
 
 export interface CartApiDeps {
   db: CartwiseDb;
@@ -123,7 +168,7 @@ export const cartApiPlugin: FastifyPluginAsync<CartApiDeps> = async (app, deps) 
         latestRows,
         optimization.winningStoreId,
       );
-      return optimization;
+      return cartOptimizationResponseSchema.parse(optimization);
     } catch (error) {
       if (error instanceof OptimizerError) {
         return reply.code(400).send({ error: error.message });
