@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { useStores } from '@/api/queries';
+import { useNearbyStores } from '@/api/queries';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { AppButton } from '@/components/ui/button';
@@ -15,7 +15,7 @@ import { usePreferencesStore } from '@/state/preferences';
 export default function SettingsScreen() {
   const zip = usePreferencesStore((state) => state.zip);
   const resetLocation = usePreferencesStore((state) => state.resetLocation);
-  const storesQuery = useStores(zip);
+  const storesQuery = useNearbyStores(zip);
   const theme = useTheme();
 
   const activeStores = useMemo(() => storesQuery.data?.stores ?? [], [storesQuery.data?.stores]);

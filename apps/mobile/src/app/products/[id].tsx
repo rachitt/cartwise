@@ -1,4 +1,3 @@
-import type { Store } from '@cartwise/shared';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
@@ -6,29 +5,23 @@ import { useMemo } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import type { ComparableProductResult } from '@/api/client';
-import { useCurrentCart, useProductPrices, useStores, useUpdateCartItem } from '@/api/queries';
+import {
+  useCurrentCart,
+  useNearbyStores,
+  useProductPrices,
+  useUpdateCartItem,
+} from '@/api/queries';
 import { CartQuantityStepper } from '@/components/cart-quantity-stepper';
 import { SourceStatusBanner } from '@/components/source-status-banner';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { AppButton } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Chip } from '@/components/ui/chip';
 import { EmptyState } from '@/components/ui/empty-state';
-import { FreshnessStamp } from '@/components/ui/freshness-stamp';
-import { PriceText } from '@/components/ui/price-text';
-import { ReceiptRow } from '@/components/ui/receipt-row';
 import { Skeleton } from '@/components/ui/skeleton';
 import { MaxContentWidth, Radii, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import {
-  chainLabel,
-  effectivePrice,
-  formatPrice,
-  formatProductSize,
-  formatUnitPriceLabel,
-} from '@/lib/price';
+import { formatProductSize } from '@/lib/price';
 import { usePreferencesStore } from '@/state/preferences';
 
 const backIcon: SymbolViewProps['name'] = {
@@ -47,38 +40,20 @@ export default function ProductDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const productId = Array.isArray(id) ? id[0] : id;
   const zip = usePreferencesStore((state) => state.zip);
-  const storesQuery = useStores(zip);
+  const storesQuery = useNearbyStores(zip);
   const activeStores = useMemo(() => storesQuery.data?.stores ?? [], [storesQuery.data?.stores]);
   const activeStoreIds = useMemo(() => activeStores.map((store) => store.id), [activeStores]);
   const productQuery = useProductPrices(productId ?? '', activeStoreIds);
   const cartQuery = useCurrentCart();
   const updateCartItem = useUpdateCartItem();
 
-  const storeById = useMemo(
-    () => new Map(activeStores.map((store) => [store.id, store])),
-    [activeStores],
-  );
   const cartItem = useMemo(
     () => cartQuery.data?.cart.items.find((item) => item.productId === productId),
     [cartQuery.data?.cart.items, productId],
   );
 
-  const prices = useMemo(
-    () =>
-      [...(productQuery.data?.prices ?? [])].sort(
-        (first, second) => effectivePrice(first) - effectivePrice(second),
-      ),
-    [productQuery.data?.prices],
-  );
-  const comparable = useMemo(() => productQuery.data?.comparable ?? [], [productQuery.data?.comparable]);
-
   const product = productQuery.data?.product;
   const size = product ? formatProductSize(product.sizeQty, product.sizeUnit) : null;
-  const cheapestPrice = prices[0] ? effectivePrice(prices[0]) : null;
-  const cheapestUnitPrice =
-    product && cheapestPrice !== null
-      ? formatUnitPriceLabel(cheapestPrice, product.sizeQty, product.sizeUnit)
-      : null;
 
   return (
     <ThemedView style={styles.screen}>
@@ -88,10 +63,10 @@ export default function ProductDetailScreen() {
 
           {productQuery.isLoading ? (
             <ProductDetailLoadingState />
-          ) : !product || prices.length === 0 || cheapestPrice === null ? (
+          ) : !product ? (
             <EmptyState
               icon={searchIcon}
-              title="No prices found nearby"
+              title="Item unavailable"
               message="Try another item or change your location."
             />
           ) : (
@@ -103,14 +78,7 @@ export default function ProductDetailScreen() {
                     {product.name}
                   </ThemedText>
                   <ThemedText type="caption" themeColor="textSecondary" numberOfLines={2}>
-                    {[
-                      product.brand,
-                      size,
-                      product.category,
-                      cheapestUnitPrice ? `best ${cheapestUnitPrice}` : null,
-                    ]
-                      .filter(Boolean)
-                      .join(' · ')}
+                    {[product.brand, size, product.category].filter(Boolean).join(' · ')}
                   </ThemedText>
                   {cartItem ? (
                     <CartQuantityStepper
@@ -131,55 +99,6 @@ export default function ProductDetailScreen() {
               </Card>
 
               <SourceStatusBanner sources={productQuery.data?.sources} stores={activeStores} />
-
-              <View style={styles.section}>
-                <ThemedText type="eyebrow">STORE PRICES</ThemedText>
-                <Card flush>
-                  {prices.map((price, index) => {
-                    const store = storeById.get(price.storeId);
-                    const currentPrice = effectivePrice(price);
-                    const delta = currentPrice - cheapestPrice;
-                    const unitPriceLabel = formatUnitPriceLabel(
-                      currentPrice,
-                      product.sizeQty,
-                      product.sizeUnit,
-                    );
-
-                    return (
-                      <ReceiptRow
-                        key={price.storeId}
-                        title={store?.name ?? 'Selected store'}
-                        meta={
-                          store
-                            ? formatStoreMeta(store, unitPriceLabel)
-                            : [chainLabel(price.source), unitPriceLabel].filter(Boolean).join(' · ')
-                        }
-                        value={currentPrice}
-                        wasValue={price.promoPrice !== null ? price.price : null}
-                        capturedAt={price.capturedAt}
-                        highlight={index === 0}
-                        deltaLabel={delta > 0 ? `+${formatPrice(delta)}` : null}
-                      />
-                    );
-                  })}
-                </Card>
-              </View>
-
-              {comparable.length > 0 ? (
-                <View style={styles.section}>
-                  <ThemedText type="eyebrow">COMPARABLE ALTERNATIVES</ThemedText>
-                  <Card flush>
-                    {comparable.map((alternative, index) => (
-                      <ComparableAlternativeRow
-                        key={alternative.product.id}
-                        alternative={alternative}
-                        showSeparator={index < comparable.length - 1}
-                        storeById={storeById}
-                      />
-                    ))}
-                  </Card>
-                </View>
-              ) : null}
             </>
           )}
         </ScrollView>
@@ -209,69 +128,6 @@ function BackControl() {
   );
 }
 
-function ComparableAlternativeRow({
-  alternative,
-  showSeparator,
-  storeById,
-}: {
-  alternative: ComparableProductResult;
-  showSeparator: boolean;
-  storeById: Map<string, Store>;
-}) {
-  const theme = useTheme();
-  const bestPrice = [...alternative.prices].sort(
-    (first, second) => effectivePrice(first) - effectivePrice(second),
-  )[0];
-
-  if (!bestPrice) {
-    return null;
-  }
-
-  const value = effectivePrice(bestPrice);
-  const store = storeById.get(bestPrice.storeId);
-  const size = formatProductSize(alternative.product.sizeQty, alternative.product.sizeUnit);
-  const unitPriceLabel = formatUnitPriceLabel(
-    value,
-    alternative.product.sizeQty,
-    alternative.product.sizeUnit,
-  );
-  const meta = [
-    alternative.product.brand,
-    size,
-    store?.name ?? chainLabel(bestPrice.source),
-    unitPriceLabel,
-  ]
-    .filter(Boolean)
-    .join(' · ');
-
-  return (
-    <View
-      style={[
-        styles.comparableRow,
-        showSeparator && styles.rowSeparator,
-        showSeparator && { borderBottomColor: theme.border },
-      ]}>
-      <ProductThumb imageUrl={alternative.product.imageUrl} name={alternative.product.name} />
-      <View style={styles.comparableCopy}>
-        <ThemedText type="smallBold" numberOfLines={2}>
-          {alternative.product.name}
-        </ThemedText>
-        <ThemedText type="caption" themeColor="textSecondary" numberOfLines={2}>
-          {meta}
-        </ThemedText>
-        <View style={styles.comparableMetaRow}>
-          <Chip
-            label={alternative.comparison.confidence >= 0.75 ? 'close match' : 'similar'}
-            tone="neutral"
-          />
-          <FreshnessStamp capturedAt={bestPrice.capturedAt} />
-        </View>
-      </View>
-      <PriceText value={value} size="sm" color="accent" />
-    </View>
-  );
-}
-
 function ProductThumb({ imageUrl, name }: { imageUrl: string | null; name: string }) {
   const theme = useTheme();
 
@@ -297,30 +153,9 @@ function ProductDetailLoadingState() {
   return (
     <View style={styles.loadingStack}>
       <Skeleton height={112} radius={Radii.card} />
-      <View style={styles.section}>
-        <ThemedText type="eyebrow">STORE PRICES</ThemedText>
-        <Card flush>
-          {[0, 1, 2].map((item) => (
-            <View key={item} style={styles.skeletonReceiptRow}>
-              <Skeleton height={18} width="52%" />
-              <Skeleton height={14} width="36%" />
-              <Skeleton height={30} width="44%" />
-            </View>
-          ))}
-        </Card>
-      </View>
+      <Skeleton height={44} width={132} radius={Radii.control} />
     </View>
   );
-}
-
-function formatDistance(distanceMiles: number | undefined) {
-  return distanceMiles === undefined ? null : `${distanceMiles.toFixed(1)} mi`;
-}
-
-function formatStoreMeta(store: Store, unitPriceLabel: string | null) {
-  return [chainLabel(store.chain), formatDistance(store.distanceMiles), unitPriceLabel]
-    .filter(Boolean)
-    .join(' · ');
 }
 
 const styles = StyleSheet.create({
@@ -379,36 +214,7 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     minWidth: 132,
   },
-  section: {
-    gap: Spacing.two,
-  },
-  comparableRow: {
-    minHeight: 104,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.three,
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.three,
-  },
-  comparableCopy: {
-    flex: 1,
-    minWidth: 0,
-    gap: Spacing.one,
-  },
-  comparableMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: Spacing.two,
-  },
-  rowSeparator: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
   loadingStack: {
     gap: Spacing.three,
-  },
-  skeletonReceiptRow: {
-    padding: Spacing.three,
-    gap: Spacing.two,
   },
 });

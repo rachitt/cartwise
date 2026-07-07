@@ -17,7 +17,12 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
-import { useCurrentCart, useSearchProducts, useStores, useUpdateCartItem } from '@/api/queries';
+import {
+  useCurrentCart,
+  useNearbyStores,
+  useSearchProducts,
+  useUpdateCartItem,
+} from '@/api/queries';
 import { BrandFirstSearchResults } from '@/components/search/brand-first-results';
 import { SourceStatusBanner } from '@/components/source-status-banner';
 import { ThemedText } from '@/components/themed-text';
@@ -66,7 +71,7 @@ export default function SearchScreen() {
   const [submittedSearchText, setSubmittedSearchText] = useState('');
   const [selectedBrand, setSelectedBrand] = useState<string | null>(null);
   const lastCompletedSearchSignature = useRef<string | null>(null);
-  const storesQuery = useStores(zip);
+  const storesQuery = useNearbyStores(zip);
   const activeStores = useMemo(() => storesQuery.data?.stores ?? [], [storesQuery.data?.stores]);
   const activeStoreIds = useMemo(() => activeStores.map((store) => store.id), [activeStores]);
   const searchQuery = useSearchProducts(submittedSearchText, activeStoreIds);
@@ -145,7 +150,7 @@ export default function SearchScreen() {
               </ThemedText>
             </View>
             <ThemedText type="display" style={styles.title}>
-              Find prices
+              Build your cart
             </ThemedText>
             <View
               style={[
@@ -186,7 +191,7 @@ export default function SearchScreen() {
                   RESULTS
                 </ThemedText>
                 <ThemedText type="caption" themeColor="textSecondary">
-                  {pricedResults.length} priced items
+                  {pricedResults.length} items
                 </ThemedText>
               </View>
             ) : null}
@@ -209,7 +214,7 @@ export default function SearchScreen() {
               <EmptyState
                 icon={SEARCH_ICON}
                 title="Search an item"
-                message="One item at a time — Cartwise compares every store nearby."
+                message="One item at a time. Cartwise checks every store nearby when you are ready."
               />
             ) : activeStoreIds.length === 0 ? (
               <EmptyState
@@ -220,12 +225,11 @@ export default function SearchScreen() {
             ) : pricedResults.length === 0 ? (
               <EmptyState
                 icon={SEARCH_ICON}
-                title="No live prices found"
+                title="No matching items found"
                 message="Try a common name like milk, eggs, or bread."
               />
             ) : (
               <BrandFirstSearchResults
-                activeStores={activeStores}
                 disabled={updateCartItem.isPending}
                 qtyByProductId={cartQtyByProductId}
                 results={pricedResults}
@@ -312,7 +316,7 @@ function SearchField({
       ) : null}
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel="Search prices"
+        accessibilityLabel="Search item"
         accessibilityState={{ disabled: !canSubmit }}
         disabled={!canSubmit}
         hitSlop={8}

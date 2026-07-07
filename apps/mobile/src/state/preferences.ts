@@ -4,20 +4,17 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 
 type PreferencesState = {
   zip: string;
-  selectedStoreIds: string[];
   locationConfirmed: boolean;
   hasHydrated: boolean;
   setZip: (zip: string) => void;
-  confirmLocation: (zip: string, selectedStoreIds?: string[]) => void;
-  setSelectedStoreIds: (storeIds: string[]) => void;
-  resetStores: () => void;
+  confirmLocation: (zip: string) => void;
   resetLocation: () => void;
   setHasHydrated: (hasHydrated: boolean) => void;
 };
 
 type PersistedPreferencesState = Pick<
   PreferencesState,
-  'zip' | 'selectedStoreIds' | 'locationConfirmed'
+  'zip' | 'locationConfirmed'
 >;
 
 // Expo Router pre-renders the app in Node for web, where AsyncStorage's
@@ -34,15 +31,11 @@ export const usePreferencesStore = create<PreferencesState>()(
   persist(
     (set) => ({
       zip: '',
-      selectedStoreIds: [],
       locationConfirmed: false,
       hasHydrated: false,
-      setZip: (zip) => set({ zip, selectedStoreIds: [], locationConfirmed: false }),
-      confirmLocation: (zip, selectedStoreIds = []) =>
-        set({ zip, selectedStoreIds, locationConfirmed: true }),
-      setSelectedStoreIds: (selectedStoreIds) => set({ selectedStoreIds }),
-      resetStores: () => set({ selectedStoreIds: [] }),
-      resetLocation: () => set({ zip: '', selectedStoreIds: [], locationConfirmed: false }),
+      setZip: (zip) => set({ zip, locationConfirmed: false }),
+      confirmLocation: (zip) => set({ zip, locationConfirmed: true }),
+      resetLocation: () => set({ zip: '', locationConfirmed: false }),
       setHasHydrated: (hasHydrated) => set({ hasHydrated }),
     }),
     {
@@ -50,11 +43,17 @@ export const usePreferencesStore = create<PreferencesState>()(
       storage: createJSONStorage(() => (canUseDeviceStorage ? AsyncStorage : noopStorage)),
       partialize: (state) => ({
         zip: state.zip,
-        selectedStoreIds: state.selectedStoreIds,
         locationConfirmed: state.locationConfirmed,
       }),
-      version: 1,
-      migrate: (persistedState) => persistedState as PersistedPreferencesState,
+      version: 2,
+      migrate: (persistedState) => {
+        const state = persistedState as Partial<PersistedPreferencesState>;
+
+        return {
+          zip: state.zip ?? '',
+          locationConfirmed: state.locationConfirmed ?? false,
+        };
+      },
       onRehydrateStorage: (state) => (rehydratedState, error) => {
         if (error || !rehydratedState) {
           state.setHasHydrated(true);

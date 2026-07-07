@@ -82,6 +82,28 @@ export interface SwapSuggestion {
   matchConfidence: number;
 }
 
+export interface CartBillLine {
+  productId: string;
+  substitutedProductId?: string;
+  substitutedProductName?: string;
+  qty: number;
+  unitPrice: number;
+  lineTotal: number;
+  capturedAt: string;
+}
+
+export interface StoreCartTotal {
+  storeId: string;
+  total: number;
+  missingItems: string[];
+  lines: CartBillLine[];
+  /** Oldest capturedAt among this store's priced lines. */
+  pricesAsOf: string;
+  coveredItemCount: number;
+  itemCount: number;
+  substitutionCount: number;
+}
+
 export interface CartOptimization {
   /** Cheapest single store for the whole cart. */
   winningStoreId: string;
@@ -90,7 +112,7 @@ export interface CartOptimization {
   worstTotal: number;
   /** worstTotal - winningTotal; the headline number shown to the user. */
   savings: number;
-  perStoreTotals: Array<{ storeId: string; total: number; missingItems: string[] }>;
+  perStoreTotals: StoreCartTotal[];
   cheaperElsewhere: CheaperElsewhereFlag[];
   swapSuggestions: SwapSuggestion[];
   /** Oldest capturedAt among prices used — drives the freshness stamp. */

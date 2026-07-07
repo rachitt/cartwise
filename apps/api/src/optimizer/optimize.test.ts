@@ -25,8 +25,39 @@ describe("optimizeCart", () => {
     expect(result.worstTotal).toBe(13);
     expect(result.savings).toBe(3);
     expect(result.perStoreTotals).toEqual([
-      { storeId: "kroger", total: 10, missingItems: [] },
-      { storeId: "target", total: 13, missingItems: [] },
+      expect.objectContaining({
+        storeId: "kroger",
+        total: 10,
+        missingItems: [],
+        coveredItemCount: 2,
+        itemCount: 2,
+        substitutionCount: 0,
+        pricesAsOf: "2026-07-04T12:00:00.000Z",
+        lines: [
+          {
+            productId: "milk",
+            qty: 1,
+            unitPrice: 4,
+            lineTotal: 4,
+            capturedAt: "2026-07-04T12:00:00.000Z",
+          },
+          {
+            productId: "eggs",
+            qty: 2,
+            unitPrice: 3,
+            lineTotal: 6,
+            capturedAt: "2026-07-04T12:00:00.000Z",
+          },
+        ],
+      }),
+      expect.objectContaining({
+        storeId: "target",
+        total: 13,
+        missingItems: [],
+        coveredItemCount: 2,
+        itemCount: 2,
+        substitutionCount: 0,
+      }),
     ]);
     expect(result.pricesAsOf).toBe("2026-07-04T12:00:00.000Z");
   });
@@ -51,11 +82,15 @@ describe("optimizeCart", () => {
     });
 
     expect(result.winningStoreId).toBe("covered");
-    expect(result.perStoreTotals).toContainEqual({
-      storeId: "cheap",
-      total: 2,
-      missingItems: ["c", "d"],
-    });
+    expect(result.perStoreTotals).toContainEqual(
+      expect.objectContaining({
+        storeId: "cheap",
+        total: 2,
+        missingItems: ["c", "d"],
+        coveredItemCount: 2,
+        itemCount: 4,
+      }),
+    );
   });
 
   it("falls back to highest coverage then cheapest when every store is below coverage", () => {
@@ -137,11 +172,15 @@ describe("optimizeCart", () => {
     });
 
     expect(result.winningStoreId).toBe("priced");
-    expect(result.perStoreTotals).toContainEqual({
-      storeId: "unknown-price",
-      total: 0,
-      missingItems: ["milk"],
-    });
+    expect(result.perStoreTotals).toContainEqual(
+      expect.objectContaining({
+        storeId: "unknown-price",
+        total: 0,
+        missingItems: ["milk"],
+        coveredItemCount: 0,
+        itemCount: 1,
+      }),
+    );
   });
 
   it("flags the best cheaper-elsewhere price per item by per-unit delta", () => {
@@ -281,10 +320,75 @@ describe("optimizeCart", () => {
     });
 
     expect(result.winningStoreId).toBe("has-it");
-    expect(result.perStoreTotals).toContainEqual({
-      storeId: "missing-it",
-      total: 0,
-      missingItems: ["rare"],
+    expect(result.perStoreTotals).toContainEqual(
+      expect.objectContaining({
+        storeId: "missing-it",
+        total: 0,
+        missingItems: ["rare"],
+        coveredItemCount: 0,
+        itemCount: 1,
+      }),
+    );
+  });
+
+  it("uses comparable substitutions for store bill lines but never tier-none matches", () => {
+    const original = product("olive-oil", {
+      name: "Olive Oil 16.9 fl oz",
+      category: "cooking oil",
+      sizeQty: 16.9,
+      sizeUnit: "floz",
+    });
+    const comparable = product("store-olive-oil", {
+      name: "Store Olive Oil 16.9 fl oz",
+      category: "cooking oil",
+      sizeQty: 16.9,
+      sizeUnit: "floz",
+    });
+    const tierNone = product("canola-oil", {
+      name: "Canola Oil 16.9 fl oz",
+      category: "cooking oil",
+      sizeQty: 16.9,
+      sizeUnit: "floz",
+    });
+
+    const result = optimizeCart({
+      items: [{ productId: "olive-oil", qty: 2 }],
+      stores: [store("store", "Store")],
+      prices: [],
+      alternatives: {
+        "olive-oil": [
+          { product: original, prices: [] },
+          {
+            product: tierNone,
+            prices: [price("canola-oil", "store", 3)],
+            comparison: comparison("none", 0.99),
+          },
+          {
+            product: comparable,
+            prices: [price("store-olive-oil", "store", 5)],
+            comparison: comparison("comparable", 0.8),
+          },
+        ],
+      },
+    });
+
+    expect(result.perStoreTotals[0]).toMatchObject({
+      storeId: "store",
+      total: 10,
+      missingItems: [],
+      coveredItemCount: 1,
+      itemCount: 1,
+      substitutionCount: 1,
+      lines: [
+        {
+          productId: "olive-oil",
+          substitutedProductId: "store-olive-oil",
+          qty: 2,
+          unitPrice: 5,
+          lineTotal: 10,
+          capturedAt: "2026-07-04T12:00:00.000Z",
+        },
+      ],
     });
   });
 });

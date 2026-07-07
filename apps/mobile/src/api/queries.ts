@@ -20,13 +20,15 @@ export const currentCartQueryKey = ['cart', 'current'] as const;
 export const cartOptimizationQueryKey = ['cart', 'optimization'] as const;
 export const alertsQueryKey = ['alerts'] as const;
 
-export function useStores(zip: string) {
+export function useNearbyStores(zip: string) {
   return useQuery({
     queryKey: ['stores', zip],
     queryFn: () => getStores(zip),
     enabled: zip.length === 5,
   });
 }
+
+export const useStores = useNearbyStores;
 
 export function useSearchProducts(query: string, storeIds: string[]) {
   const normalizedQuery = query.trim();
