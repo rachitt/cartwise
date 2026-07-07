@@ -4,7 +4,11 @@ import Constants from 'expo-constants';
 import { getDeviceId } from '@/lib/device-id';
 
 export type StoresResponse = { stores: Store[] };
-export type SearchResult = { product: Product; prices: StorePrice[] };
+export type ProductMatchSummary = {
+  confidence: 'exact' | 'new' | 'mixed' | 'unknown';
+  methods: ('upc' | 'identity' | 'inserted')[];
+};
+export type SearchResult = { product: Product; prices: StorePrice[]; match?: ProductMatchSummary };
 export type SearchResponse = { results: SearchResult[] };
 export type ProductPricesResponse = { product: Product; prices: StorePrice[] };
 export type CartStatus = 'open' | 'finalized';

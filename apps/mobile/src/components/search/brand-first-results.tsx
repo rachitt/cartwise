@@ -1,5 +1,5 @@
 import type { Product, Store, StorePrice } from '@cartwise/shared';
-import type { SearchResult } from '@/api/client';
+import type { ProductMatchSummary, SearchResult } from '@/api/client';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, {
@@ -286,6 +286,7 @@ function BrandProductCard({
       ? null
       : formatUnitPriceLabel(cheapestValue, result.product.sizeQty, result.product.sizeUnit);
   const metaLabel = getProductMeta(result.product, unitPriceLabel);
+  const productMatchLabel = matchLabel(result.match);
 
   return (
     <Animated.View
@@ -307,6 +308,9 @@ function BrandProductCard({
             <ThemedText type="caption" themeColor="textSecondary" numberOfLines={1}>
               {metaLabel}
             </ThemedText>
+            {productMatchLabel ? (
+              <Chip label={productMatchLabel} tone="neutral" style={styles.matchChip} />
+            ) : null}
           </View>
           <View style={styles.productAction}>
             <AddToCartControl
@@ -495,6 +499,22 @@ function getProductMeta(product: Product, unitPriceLabel: string | null) {
     .join(' · ') || 'Details unavailable';
 }
 
+function matchLabel(match: ProductMatchSummary | undefined) {
+  if (!match || match.confidence === 'unknown') {
+    return null;
+  }
+
+  if (match.confidence === 'exact') {
+    return 'exact match';
+  }
+
+  if (match.confidence === 'mixed') {
+    return 'mixed match';
+  }
+
+  return 'single-store item';
+}
+
 function formatStoreMeta(store: Store, unitPriceLabel: string | null) {
   const distance =
     store.distanceMiles === undefined ? null : `${store.distanceMiles.toFixed(1)} mi`;
@@ -569,6 +589,9 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
     gap: Spacing.half,
+  },
+  matchChip: {
+    marginTop: Spacing.half,
   },
   productAction: {
     flexShrink: 0,

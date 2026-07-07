@@ -60,17 +60,23 @@ export function ReceiptRow({
           <PriceText value={value} size="md" color={highlight ? 'accent' : 'text'} />
         </View>
       </View>
-      <View style={styles.bottomLine}>
-        <View style={styles.metaBlock}>
-          {meta ? (
-            <ThemedText type="caption" themeColor="textSecondary" numberOfLines={1}>
-              {meta}
-            </ThemedText>
-          ) : null}
-          {highlight ? <Chip label="Best price" tone="accent" /> : null}
-          {deltaLabel ? <Chip label={deltaLabel} tone="deal" /> : null}
+      <View style={styles.bottomBlock}>
+        {meta ? (
+          <ThemedText
+            type="caption"
+            themeColor="textSecondary"
+            numberOfLines={2}
+            style={styles.metaText}>
+            {meta}
+          </ThemedText>
+        ) : null}
+        <View style={styles.statusLine}>
+          <View style={styles.chipLine}>
+            {highlight ? <Chip label="Best price" tone="accent" /> : null}
+            {deltaLabel ? <Chip label={deltaLabel} tone="deal" /> : null}
+          </View>
+          <FreshnessStamp capturedAt={capturedAt} style={styles.freshness} />
         </View>
-        <FreshnessStamp capturedAt={capturedAt} />
       </View>
     </View>
   );
@@ -104,17 +110,28 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     gap: Spacing.two,
   },
-  bottomLine: {
+  bottomBlock: {
+    gap: Spacing.one,
+  },
+  metaText: {
+    minWidth: 0,
+  },
+  statusLine: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: Spacing.two,
+    flexWrap: 'wrap',
   },
-  metaBlock: {
+  chipLine: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two,
+    flexWrap: 'wrap',
     flexShrink: 1,
     minWidth: 0,
+  },
+  freshness: {
+    flexShrink: 0,
   },
 });

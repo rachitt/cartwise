@@ -347,9 +347,13 @@ describe("priceApiPlugin collector degradation", () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json().results.map((result: { product: { name: string } }) => result.product.name)).toEqual([
-      "Grade A Large Eggs",
-      "Liquid Egg Whites",
+    const body = response.json();
+    expect(body.results.map((result: { product: { name: string } }) => result.product.name)).toEqual(
+      ["Grade A Large Eggs", "Liquid Egg Whites"],
+    );
+    expect(body.results.map((result: { match: unknown }) => result.match)).toEqual([
+      { confidence: "new", methods: ["inserted"] },
+      { confidence: "new", methods: ["inserted"] },
     ]);
     expect(db.insertedProductNames).toEqual(["Grade A Large Eggs", "Liquid Egg Whites"]);
   });
