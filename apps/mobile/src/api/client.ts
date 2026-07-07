@@ -9,8 +9,12 @@ export type ResponseSource = {
   status: SourceStatus;
   capturedAt?: string;
 };
+export type ProductMatchSummary = {
+  confidence: 'exact' | 'new' | 'mixed' | 'unknown';
+  methods: ('upc' | 'identity' | 'inserted')[];
+};
 export type StoresResponse = { stores: Store[]; sources?: ResponseSource[] };
-export type SearchResult = { product: Product; prices: StorePrice[] };
+export type SearchResult = { product: Product; prices: StorePrice[]; match?: ProductMatchSummary };
 export type SearchResponse = { results: SearchResult[]; sources?: ResponseSource[] };
 export type ProductPricesResponse = {
   product: Product;

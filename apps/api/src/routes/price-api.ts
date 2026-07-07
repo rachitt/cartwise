@@ -3,7 +3,12 @@ import type { FastifyPluginAsync, FastifyReply } from "fastify";
 import { z } from "zod";
 
 import { createCache, type Cache, type CacheResult } from "../cache.js";
-import { upsertCollectedProduct } from "../catalog/matcher.js";
+import {
+  upsertCollectedProduct,
+  type ProductMatch,
+  type ProductMatchConfidence,
+  type ProductMatchMethod,
+} from "../catalog/matcher.js";
 import { recordCollectorOutcome } from "../collectors/health.js";
 import type { CollectedProduct, Collector } from "../collectors/types.js";
 import type { CartwiseDb, ProductRow } from "../db/repository.js";
@@ -79,6 +84,12 @@ interface SearchCacheItem {
   product: Product;
   price: StorePrice | null;
   relevanceScore: number;
+  match?: ProductMatch;
+}
+
+interface ProductMatchSummary {
+  confidence: ProductMatchConfidence | "mixed" | "unknown";
+  methods: ProductMatchMethod[];
 }
 
 interface CollectorHealthLogger {
@@ -95,8 +106,12 @@ export const priceApiPlugin: FastifyPluginAsync<PriceApiDeps> = async (app, deps
       return reply;
     }
 
-    const stores = await deps.db.listStoresByZip(query.zip);
-    const chains = Array.from(new Set(stores.map((store) => store.chainSlug))).sort();
+    const { stores, sources } = await collectStoresForZip(deps, cache, query.zip, app.log);
+    const chains = Array.from(new Set(stores.map((store) => store.chain))).sort();
+
+    if (shouldReturnCollectorFailure(sources)) {
+      return reply.code(503).send({ error: "Collectors unavailable", sources });
+    }
 
     return {
       supported: stores.length >= 2 && chains.length >= 2,
@@ -111,42 +126,13 @@ export const priceApiPlugin: FastifyPluginAsync<PriceApiDeps> = async (app, deps
       return reply;
     }
 
-    const stores: Store[] = [];
-    const sources: ResponseSource[] = [];
-
-    for (const chain of CHAINS) {
-      const collector = deps.getCollector(chain);
-      if (!collector) {
-        sources.push({ chain, status: "unavailable" });
-        continue;
-      }
-
-      const result = await collectWithSource(
-        sources,
-        chain,
-        cache,
-        `stores:${chain}:${query.zip}`,
-        STORES_TTL_SECONDS,
-        () => collector.findStores(query.zip),
-        app.log,
-      );
-      if (!result) {
-        continue;
-      }
-
-      for (const collectedStore of result.value) {
-        const row = await deps.db.upsertStore(chain, collectedStore);
-        stores.push(toStore(row));
-      }
-    }
-
-    const nearbyStores = filterNearbyStores(stores, query.zip);
+    const { stores, sources } = await collectStoresForZip(deps, cache, query.zip, app.log);
 
     if (shouldReturnCollectorFailure(sources)) {
       return reply.code(503).send({ error: "Collectors unavailable", sources });
     }
 
-    return { stores: nearbyStores, sources };
+    return { stores, sources };
   });
 
   app.get("/search", async (request, reply) => {
@@ -158,7 +144,12 @@ export const priceApiPlugin: FastifyPluginAsync<PriceApiDeps> = async (app, deps
     const stores = await deps.db.getStoresByIds(query.storeIds);
     const groupedResults = new Map<
       string,
-      { product: Product; prices: StorePrice[]; relevanceScore: number }
+      {
+        product: Product;
+        prices: StorePrice[];
+        relevanceScore: number;
+        match: ProductMatchSummary;
+      }
     >();
     const normalizedQuery = normalizeSearchQuery(query.q);
     const sources: ResponseSource[] = [];
@@ -174,7 +165,7 @@ export const priceApiPlugin: FastifyPluginAsync<PriceApiDeps> = async (app, deps
         sources,
         store.chainSlug,
         cache,
-        `search:v3:${store.chainSlug}:${store.externalLocationId}:${normalizedQuery}`,
+        `search:v4:${store.chainSlug}:${store.externalLocationId}:${normalizedQuery}`,
         PRODUCTS_TTL_SECONDS,
         async () => {
           const collectedProducts = (await collector.searchProducts(query.q, store.externalLocationId))
@@ -199,6 +190,7 @@ export const priceApiPlugin: FastifyPluginAsync<PriceApiDeps> = async (app, deps
               product: toProduct(matched.product),
               price: matched.price,
               relevanceScore,
+              match: matched.match,
             });
           }
 
@@ -221,8 +213,10 @@ export const priceApiPlugin: FastifyPluginAsync<PriceApiDeps> = async (app, deps
           product: matched.product,
           prices: [],
           relevanceScore,
+          match: summarizeProductMatch(matched.match),
         };
         existing.relevanceScore = Math.max(existing.relevanceScore, relevanceScore);
+        existing.match = mergeProductMatchSummaries(existing.match, matched.match);
 
         if (matched.price) {
           existing.prices.push(matched.price);
@@ -237,6 +231,7 @@ export const priceApiPlugin: FastifyPluginAsync<PriceApiDeps> = async (app, deps
         product: result.product,
         prices: sortPrices(result.prices),
         relevanceScore: result.relevanceScore,
+        match: result.match,
       }))
       .filter((result) => result.prices.length > 0)
       .sort(
@@ -340,6 +335,44 @@ export const priceApiPlugin: FastifyPluginAsync<PriceApiDeps> = async (app, deps
     return { product: toProduct(product), prices: sortPrices(prices), sources };
   });
 };
+
+async function collectStoresForZip(
+  deps: Pick<PriceApiDeps, "db" | "getCollector">,
+  cache: Cache,
+  zip: string,
+  logger?: CollectorHealthLogger,
+): Promise<{ stores: Store[]; sources: ResponseSource[] }> {
+  const stores: Store[] = [];
+  const sources: ResponseSource[] = [];
+
+  for (const chain of CHAINS) {
+    const collector = deps.getCollector(chain);
+    if (!collector) {
+      sources.push({ chain, status: "unavailable" });
+      continue;
+    }
+
+    const result = await collectWithSource(
+      sources,
+      chain,
+      cache,
+      `stores:${chain}:${zip}`,
+      STORES_TTL_SECONDS,
+      () => collector.findStores(zip),
+      logger,
+    );
+    if (!result) {
+      continue;
+    }
+
+    for (const collectedStore of result.value) {
+      const row = await deps.db.upsertStore(chain, collectedStore);
+      stores.push(toStore(row));
+    }
+  }
+
+  return { stores: filterNearbyStores(stores, zip), sources };
+}
 
 async function collectWithSource<T>(
   sources: ResponseSource[],
@@ -497,6 +530,37 @@ function degreesToRadians(value: number): number {
 
 function firstFiveZip(zip: string): string {
   return zip.match(/\d{5}/)?.[0] ?? zip;
+}
+
+function summarizeProductMatch(match?: ProductMatch): ProductMatchSummary {
+  if (!match) {
+    return { confidence: "unknown", methods: [] };
+  }
+
+  return { confidence: match.confidence, methods: [match.method] };
+}
+
+function mergeProductMatchSummaries(
+  current: ProductMatchSummary,
+  nextMatch?: ProductMatch,
+): ProductMatchSummary {
+  const next = summarizeProductMatch(nextMatch);
+  const methods = sortMatchMethods(new Set([...current.methods, ...next.methods]));
+
+  if (current.confidence === "unknown") {
+    return { confidence: next.confidence, methods };
+  }
+
+  if (next.confidence === "unknown" || current.confidence === next.confidence) {
+    return { confidence: current.confidence, methods };
+  }
+
+  return { confidence: "mixed", methods };
+}
+
+function sortMatchMethods(methods: Set<ProductMatchMethod>): ProductMatchMethod[] {
+  const order: ProductMatchMethod[] = ["upc", "identity", "inserted"];
+  return order.filter((method) => methods.has(method));
 }
 
 function toProduct(product: ProductRow): Product {

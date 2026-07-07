@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { createCache, type CacheDb } from "../cache.js";
 import type { CollectedProduct, Collector, CollectedStore } from "../collectors/types.js";
-import type { CacheEntry, CartwiseDb, StoreRow } from "../db/repository.js";
+import type { CacheEntry, CartwiseDb } from "../db/repository.js";
 import { priceApiPlugin } from "./price-api.js";
 
 describe("priceApiPlugin validation", () => {
@@ -76,14 +76,26 @@ describe("priceApiPlugin coverage", () => {
     expect(response.statusCode).toBe(400);
   });
 
-  it("supports ZIPs with at least two stores across two chains", async () => {
+  it("supports ZIPs with at least two collected nearby stores across two chains", async () => {
     app = Fastify();
+    const db = fakePriceDb();
     await app.register(priceApiPlugin, {
-      db: fakeCoverageDb([
-        storeRow("store-1", "kroger", "45202"),
-        storeRow("store-2", "target", "45202-1234"),
-      ]),
-      getCollector: () => null,
+      db,
+      getCollector: (chain: ChainSlug) => {
+        if (chain === "kroger") {
+          return collectorFor(chain, {
+            stores: [storeCandidate("kroger-1", "Kroger", "45202", 39.1, -84.5)],
+          });
+        }
+
+        if (chain === "target") {
+          return collectorFor(chain, {
+            stores: [storeCandidate("target-1", "Target", "45202-1234", 39.11, -84.51)],
+          });
+        }
+
+        return null;
+      },
     });
 
     const response = await app.inject({ method: "GET", url: "/v1/coverage?zip=45202" });
@@ -98,12 +110,18 @@ describe("priceApiPlugin coverage", () => {
 
   it("does not support ZIPs covered by only one chain", async () => {
     app = Fastify();
+    const db = fakePriceDb();
     await app.register(priceApiPlugin, {
-      db: fakeCoverageDb([
-        storeRow("store-1", "kroger", "45202"),
-        storeRow("store-2", "kroger", "45202"),
-      ]),
-      getCollector: () => null,
+      db,
+      getCollector: (chain: ChainSlug) =>
+        chain === "kroger"
+          ? collectorFor(chain, {
+              stores: [
+                storeCandidate("kroger-1", "Kroger 1", "45202", 39.1, -84.5),
+                storeCandidate("kroger-2", "Kroger 2", "45202", 39.11, -84.51),
+              ],
+            })
+          : null,
     });
 
     const response = await app.inject({ method: "GET", url: "/v1/coverage?zip=45202" });
@@ -408,9 +426,13 @@ describe("priceApiPlugin collector degradation", () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json().results.map((result: { product: { name: string } }) => result.product.name)).toEqual([
-      "Grade A Large Eggs",
-      "Liquid Egg Whites",
+    const body = response.json();
+    expect(body.results.map((result: { product: { name: string } }) => result.product.name)).toEqual(
+      ["Grade A Large Eggs", "Liquid Egg Whites"],
+    );
+    expect(body.results.map((result: { match: unknown }) => result.match)).toEqual([
+      { confidence: "new", methods: ["inserted"] },
+      { confidence: "new", methods: ["inserted"] },
     ]);
     expect(db.insertedProductNames).toEqual(["Grade A Large Eggs", "Liquid Egg Whites"]);
   });
@@ -427,41 +449,6 @@ function throwingDb(): CartwiseDb {
       },
     },
   ) as CartwiseDb;
-}
-
-function fakeCoverageDb(stores: StoreRow[]): CartwiseDb {
-  const target = {
-    async listStoresByZip(zip: string) {
-      return stores.filter((store) => store.zip.startsWith(zip));
-    },
-  };
-
-  const proxied = new Proxy(target, {
-    get(targetObject, property) {
-      if (property in targetObject) {
-        return targetObject[property as keyof typeof targetObject];
-      }
-
-      return async () => {
-        throw new Error(`Unexpected DB call: ${String(property)}`);
-      };
-    },
-  });
-
-  return proxied as unknown as CartwiseDb;
-}
-
-function storeRow(id: string, chainSlug: ChainSlug, zip: string): StoreRow {
-  return {
-    id,
-    chainSlug,
-    externalLocationId: `external-${id}`,
-    name: `${chainSlug} ${id}`,
-    address: `${id} Main St`,
-    zip,
-    lat: 39.1,
-    lng: -84.5,
-  };
 }
 
 function collectorFor(

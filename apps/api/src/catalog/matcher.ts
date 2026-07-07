@@ -4,10 +4,19 @@ import type { CollectedProduct } from "../collectors/types.js";
 import type { CartwiseDb, ProductRow, StoreProductRow } from "../db/repository.js";
 import { parseSize } from "./size.js";
 
+export type ProductMatchConfidence = "exact" | "new";
+export type ProductMatchMethod = "upc" | "identity" | "inserted";
+
+export interface ProductMatch {
+  confidence: ProductMatchConfidence;
+  method: ProductMatchMethod;
+}
+
 export interface MatchedCollectedProduct {
   product: ProductRow;
   storeProduct: StoreProductRow;
   price: StorePrice | null;
+  match: ProductMatch;
 }
 
 export async function upsertCollectedProduct(
@@ -17,20 +26,29 @@ export async function upsertCollectedProduct(
   chain: ChainSlug,
 ): Promise<MatchedCollectedProduct> {
   const parsedSize = parseSize(collected.sizeRaw);
+  const normalizedUpc = normalizeNullable(collected.upc);
+  const identity = {
+    name: collected.name,
+    brand: normalizeNullable(collected.brand),
+    sizeQty: parsedSize?.sizeQty ?? null,
+    sizeUnit: parsedSize?.sizeUnit ?? null,
+  };
+  const upcProduct = normalizedUpc ? await db.findProductByUpc(normalizedUpc) : null;
+  const identityProduct = upcProduct ? null : await db.findProductByIdentity(identity);
+  const match: ProductMatch = upcProduct
+    ? { confidence: "exact", method: "upc" }
+    : identityProduct
+      ? { confidence: "exact", method: "identity" }
+      : { confidence: "new", method: "inserted" };
   const product =
-    (collected.upc ? await db.findProductByUpc(collected.upc) : null) ??
-    (await db.findProductByIdentity({
-      name: collected.name,
-      brand: normalizeNullable(collected.brand),
-      sizeQty: parsedSize?.sizeQty ?? null,
-      sizeUnit: parsedSize?.sizeUnit ?? null,
-    })) ??
+    upcProduct ??
+    identityProduct ??
     (await db.insertProduct({
       name: collected.name.trim(),
-      brand: normalizeNullable(collected.brand),
-      sizeQty: parsedSize?.sizeQty ?? null,
-      sizeUnit: parsedSize?.sizeUnit ?? null,
-      upc: normalizeNullable(collected.upc),
+      brand: identity.brand,
+      sizeQty: identity.sizeQty,
+      sizeUnit: identity.sizeUnit,
+      upc: normalizedUpc,
       category: normalizeNullable(collected.category),
       imageUrl: normalizeNullable(collected.imageUrl),
     }));
@@ -39,7 +57,7 @@ export async function upsertCollectedProduct(
   const capturedAt = asDate(collected.capturedAt);
 
   if (collected.price === null) {
-    return { product, storeProduct, price: null };
+    return { product, storeProduct, price: null, match };
   }
 
   await db.insertPriceSnapshot({
@@ -53,6 +71,7 @@ export async function upsertCollectedProduct(
   return {
     product,
     storeProduct,
+    match,
     price: {
       storeId,
       productId: product.id,

@@ -40,6 +40,7 @@ describe("upsertCollectedProduct", () => {
     );
 
     expect(matched.product.id).toBe("upc-product");
+    expect(matched.match).toEqual({ confidence: "exact", method: "upc" });
     expect(db.insertedProducts).toEqual([]);
   });
 
@@ -65,6 +66,7 @@ describe("upsertCollectedProduct", () => {
     );
 
     expect(matched.product.id).toBe("identity-product");
+    expect(matched.match).toEqual({ confidence: "exact", method: "identity" });
     expect(db.insertedProducts).toEqual([]);
   });
 
@@ -90,6 +92,7 @@ describe("upsertCollectedProduct", () => {
       sizeQty: 16.9,
       sizeUnit: "floz",
     });
+    expect(matched.match).toEqual({ confidence: "new", method: "inserted" });
     expect(db.insertedProducts).toHaveLength(1);
     expect(db.priceSnapshots).toEqual([
       {
