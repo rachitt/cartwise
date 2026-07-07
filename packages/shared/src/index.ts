@@ -58,6 +58,7 @@ export interface ProductComparison {
 }
 
 export const MIN_SWAP_CONFIDENCE = 0.6;
+export const OPTIMIZER_MIN_COVERAGE = 0.7;
 
 export interface CartItemInput {
   productId: string;
@@ -84,6 +85,7 @@ export interface SwapSuggestion {
 
 export interface CartBillLine {
   productId: string;
+  productName?: string;
   substitutedProductId?: string;
   substitutedProductName?: string;
   qty: number;
@@ -92,13 +94,18 @@ export interface CartBillLine {
   capturedAt: string;
 }
 
+export interface MissingCartItem {
+  productId: string;
+  name: string;
+}
+
 export interface StoreCartTotal {
   storeId: string;
   total: number;
-  missingItems: string[];
+  missingItems: MissingCartItem[];
   lines: CartBillLine[];
   /** Oldest capturedAt among this store's priced lines. */
-  pricesAsOf: string;
+  pricesAsOf: string | null;
   coveredItemCount: number;
   itemCount: number;
   substitutionCount: number;
@@ -116,5 +123,5 @@ export interface CartOptimization {
   cheaperElsewhere: CheaperElsewhereFlag[];
   swapSuggestions: SwapSuggestion[];
   /** Oldest capturedAt among prices used — drives the freshness stamp. */
-  pricesAsOf: string;
+  pricesAsOf: string | null;
 }

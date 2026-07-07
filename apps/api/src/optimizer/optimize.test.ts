@@ -86,11 +86,49 @@ describe("optimizeCart", () => {
       expect.objectContaining({
         storeId: "cheap",
         total: 2,
-        missingItems: ["c", "d"],
+        missingItems: [missingItem("c"), missingItem("d")],
         coveredItemCount: 2,
         itemCount: 4,
       }),
     );
+  });
+
+  it("ranks covered stores before uncovered stores and excludes uncovered stores from savings", () => {
+    const result = optimizeCart({
+      items: [
+        { productId: "a", qty: 1 },
+        { productId: "b", qty: 1 },
+        { productId: "c", qty: 1 },
+        { productId: "d", qty: 1 },
+      ],
+      stores: [
+        store("partial-cheap", "Partial Cheap"),
+        store("covered-high", "Covered High"),
+        store("covered-low", "Covered Low"),
+        store("empty", "Empty"),
+      ],
+      prices: [
+        price("a", "partial-cheap", 1),
+        price("b", "partial-cheap", 1),
+        price("a", "covered-high", 5),
+        price("b", "covered-high", 5),
+        price("c", "covered-high", 5),
+        price("a", "covered-low", 3),
+        price("b", "covered-low", 3),
+        price("c", "covered-low", 3),
+      ],
+      alternatives: withOriginals(product("a"), product("b"), product("c"), product("d")),
+    });
+
+    expect(result.winningStoreId).toBe("covered-low");
+    expect(result.worstTotal).toBe(15);
+    expect(result.savings).toBe(6);
+    expect(result.perStoreTotals.map((storeTotal) => storeTotal.storeId)).toEqual([
+      "covered-low",
+      "covered-high",
+      "partial-cheap",
+      "empty",
+    ]);
   });
 
   it("falls back to highest coverage then cheapest when every store is below coverage", () => {
@@ -113,8 +151,8 @@ describe("optimizeCart", () => {
 
     expect(result.winningStoreId).toBe("beta");
     expect(result.winningTotal).toBe(6);
-    expect(result.worstTotal).toBe(8);
-    expect(result.savings).toBe(2);
+    expect(result.worstTotal).toBe(6);
+    expect(result.savings).toBe(0);
   });
 
   it("uses deterministic tie-breaks by missing count and then store name", () => {
@@ -176,7 +214,26 @@ describe("optimizeCart", () => {
       expect.objectContaining({
         storeId: "unknown-price",
         total: 0,
-        missingItems: ["milk"],
+        missingItems: [missingItem("milk")],
+        coveredItemCount: 0,
+        itemCount: 1,
+      }),
+    );
+  });
+
+  it("returns null pricesAsOf for stores with no priced lines", () => {
+    const result = optimizeCart({
+      items: [{ productId: "rare", qty: 1, name: "Rare Jam" }],
+      stores: [store("has-it", "Has It"), store("missing-it", "Missing It")],
+      prices: [price("rare", "has-it", 7)],
+      alternatives: withOriginals(product("rare", { name: "Rare Jam" })),
+    });
+
+    expect(result.perStoreTotals).toContainEqual(
+      expect.objectContaining({
+        storeId: "missing-it",
+        pricesAsOf: null,
+        missingItems: [missingItem("rare", "Rare Jam")],
         coveredItemCount: 0,
         itemCount: 1,
       }),
@@ -324,7 +381,7 @@ describe("optimizeCart", () => {
       expect.objectContaining({
         storeId: "missing-it",
         total: 0,
-        missingItems: ["rare"],
+        missingItems: [missingItem("rare")],
         coveredItemCount: 0,
         itemCount: 1,
       }),
@@ -445,6 +502,10 @@ function nullPrice(productId: string, storeId: string): StorePrice {
     capturedAt: "2026-07-04T12:00:00.000Z",
     source: "kroger",
   };
+}
+
+function missingItem(productId: string, name = productId) {
+  return { productId, name };
 }
 
 function withOriginals(...products: Product[]): OptimizerInput["alternatives"] {
