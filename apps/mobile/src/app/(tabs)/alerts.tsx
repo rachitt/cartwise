@@ -1,9 +1,11 @@
+import type { Store } from '@cartwise/shared';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { useAlerts, useMarkAlertRead, useRemoveWatch } from '@/api/queries';
+import type { PriceAlert } from '@/api/client';
+import { useAlerts, useMarkAlertRead, useRemoveWatch, useStores } from '@/api/queries';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { AppButton } from '@/components/ui/button';
@@ -14,12 +16,13 @@ import { PriceText } from '@/components/ui/price-text';
 import { Skeleton } from '@/components/ui/skeleton';
 import { BottomTabInset, MaxContentWidth, Radii, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { formatPrice, formatRelativeTime } from '@/lib/price';
+import { chainLabel, formatPrice, formatRelativeTime } from '@/lib/price';
 import {
   getPushPermissionStatus,
   registerForPriceAlerts,
   type PushPermissionStatus,
 } from '@/lib/push-registration';
+import { usePreferencesStore } from '@/state/preferences';
 
 const bellIcon: SymbolViewProps['name'] = {
   ios: 'bell',
@@ -39,7 +42,9 @@ export default function AlertsScreen() {
     useState<PushPermissionStatus>('undetermined');
   const [permissionMessage, setPermissionMessage] = useState<string | null>(null);
   const [isRegistering, setIsRegistering] = useState(false);
+  const zip = usePreferencesStore((state) => state.zip);
   const alertsQuery = useAlerts(permissionStatus === 'granted');
+  const storesQuery = useStores(zip);
   const markAlertRead = useMarkAlertRead();
   const removeWatch = useRemoveWatch();
 
@@ -71,6 +76,10 @@ export default function AlertsScreen() {
     [alertsQuery.data?.alerts],
   );
   const watches = alertsQuery.data?.watches ?? [];
+  const storeById = useMemo(
+    () => new Map((storesQuery.data?.stores ?? []).map((store) => [store.id, store])),
+    [storesQuery.data?.stores],
+  );
   const isPermissionReady = permissionStatus === 'granted';
 
   const handleEnableAlerts = async () => {
@@ -150,6 +159,7 @@ export default function AlertsScreen() {
               <RecentDropsSection
                 alerts={alerts}
                 disabled={markAlertRead.isPending}
+                storeById={storeById}
                 onMarkRead={(alertId) => markAlertRead.mutate(alertId)}
               />
               <WatchedItemsSection
@@ -225,18 +235,12 @@ function PermissionCard({
 function RecentDropsSection({
   alerts,
   disabled,
+  storeById,
   onMarkRead,
 }: {
-  alerts: {
-    id: string;
-    productName: string;
-    storeName: string;
-    oldPrice: number;
-    newPrice: number;
-    capturedAt: string;
-    read: boolean;
-  }[];
+  alerts: PriceAlert[];
   disabled: boolean;
+  storeById: ReadonlyMap<string, Store>;
   onMarkRead: (alertId: string) => void;
 }) {
   const theme = useTheme();
@@ -255,6 +259,7 @@ function RecentDropsSection({
         <Card flush>
           {alerts.map((alert, index) => {
             const savings = Math.max(0, alert.oldPrice - alert.newPrice);
+            const store = storeById.get(alert.storeId);
 
             return (
               <Pressable
@@ -287,7 +292,7 @@ function RecentDropsSection({
                     {alert.productName}
                   </ThemedText>
                   <ThemedText type="caption" themeColor="textSecondary" numberOfLines={1}>
-                    {alert.storeName}
+                    {formatAlertStoreMeta(alert, store)}
                   </ThemedText>
                   <View style={styles.priceMovement}>
                     <PriceText value={alert.oldPrice} size="sm" strike />
@@ -308,6 +313,13 @@ function RecentDropsSection({
       )}
     </View>
   );
+}
+
+function formatAlertStoreMeta(alert: PriceAlert, store: Store | undefined) {
+  const chain = store ? chainLabel(store.chain) : alert.storeChain ? chainLabel(alert.storeChain) : null;
+  const distance = store?.distanceMiles === undefined ? null : `${store.distanceMiles.toFixed(1)} mi`;
+
+  return [alert.storeName, chain, distance].filter(Boolean).join(' · ');
 }
 
 function WatchedItemsSection({

@@ -56,6 +56,85 @@ describe("priceApiPlugin validation", () => {
   });
 });
 
+describe("priceApiPlugin coverage", () => {
+  let app: ReturnType<typeof Fastify> | null = null;
+
+  afterEach(async () => {
+    await app?.close();
+    app = null;
+  });
+
+  it("returns 400 for an invalid coverage ZIP", async () => {
+    app = Fastify();
+    await app.register(priceApiPlugin, {
+      db: throwingDb(),
+      getCollector: () => null,
+    });
+
+    const response = await app.inject({ method: "GET", url: "/v1/coverage?zip=abcde" });
+
+    expect(response.statusCode).toBe(400);
+  });
+
+  it("supports ZIPs with at least two collected nearby stores across two chains", async () => {
+    app = Fastify();
+    const db = fakePriceDb();
+    await app.register(priceApiPlugin, {
+      db,
+      getCollector: (chain: ChainSlug) => {
+        if (chain === "kroger") {
+          return collectorFor(chain, {
+            stores: [storeCandidate("kroger-1", "Kroger", "45202", 39.1, -84.5)],
+          });
+        }
+
+        if (chain === "target") {
+          return collectorFor(chain, {
+            stores: [storeCandidate("target-1", "Target", "45202-1234", 39.11, -84.51)],
+          });
+        }
+
+        return null;
+      },
+    });
+
+    const response = await app.inject({ method: "GET", url: "/v1/coverage?zip=45202" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      supported: true,
+      chains: ["kroger", "target"],
+      storeCount: 2,
+    });
+  });
+
+  it("does not support ZIPs covered by only one chain", async () => {
+    app = Fastify();
+    const db = fakePriceDb();
+    await app.register(priceApiPlugin, {
+      db,
+      getCollector: (chain: ChainSlug) =>
+        chain === "kroger"
+          ? collectorFor(chain, {
+              stores: [
+                storeCandidate("kroger-1", "Kroger 1", "45202", 39.1, -84.5),
+                storeCandidate("kroger-2", "Kroger 2", "45202", 39.11, -84.51),
+              ],
+            })
+          : null,
+    });
+
+    const response = await app.inject({ method: "GET", url: "/v1/coverage?zip=45202" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      supported: false,
+      chains: ["kroger"],
+      storeCount: 2,
+    });
+  });
+});
+
 describe("priceApiPlugin collector degradation", () => {
   let app: ReturnType<typeof Fastify> | null = null;
 

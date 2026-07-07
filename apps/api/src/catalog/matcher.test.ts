@@ -179,6 +179,10 @@ class FakeCatalogDb implements CartwiseDb {
     throw new Error("not implemented");
   }
 
+  async listStoresByZip(): Promise<StoreRow[]> {
+    throw new Error("not implemented");
+  }
+
   async getProductById(): Promise<ProductRow | null> {
     throw new Error("not implemented");
   }

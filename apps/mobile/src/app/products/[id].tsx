@@ -8,6 +8,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useCurrentCart, useProductPrices, useStores, useUpdateCartItem } from '@/api/queries';
 import { CartQuantityStepper } from '@/components/cart-quantity-stepper';
+import { SourceStatusBanner } from '@/components/source-status-banner';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { AppButton } from '@/components/ui/button';
@@ -124,6 +125,8 @@ export default function ProductDetailScreen() {
                 </View>
               </Card>
 
+              <SourceStatusBanner sources={productQuery.data?.sources} stores={activeStores} />
+
               <View style={styles.section}>
                 <ThemedText type="eyebrow">STORE PRICES</ThemedText>
                 <Card flush>
@@ -227,11 +230,11 @@ function ProductDetailLoadingState() {
 }
 
 function formatDistance(distanceMiles: number | undefined) {
-  return distanceMiles?.toFixed(1) ?? '--';
+  return distanceMiles === undefined ? null : `${distanceMiles.toFixed(1)} mi`;
 }
 
 function formatStoreMeta(store: Store, unitPriceLabel: string | null) {
-  return [chainLabel(store.chain), `${formatDistance(store.distanceMiles)} mi`, unitPriceLabel]
+  return [chainLabel(store.chain), formatDistance(store.distanceMiles), unitPriceLabel]
     .filter(Boolean)
     .join(' · ');
 }
