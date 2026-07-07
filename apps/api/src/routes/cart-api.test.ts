@@ -138,6 +138,38 @@ describe("cartApiPlugin", () => {
     expect(db.carts[0]?.status).toBe("finalized");
   });
 
+  it("returns named missing items and null pricesAsOf for stores with no priced lines", async () => {
+    const db = new FakeCartDb();
+    const cart = await db.getOrCreateActiveCart(deviceId);
+    await db.upsertCartItem(cart.id, milkId, 1);
+    await db.upsertCartItem(cart.id, breadId, 1);
+    db.setPrice(milkId, storeOneId, 2);
+    db.setPrice(breadId, storeOneId, 1);
+    app = await buildTestApp(db);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/carts/current/finalize",
+      headers: { "x-device-id": deviceId },
+      payload: { storeIds: [storeOneId, storeTwoId] },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().perStoreTotals).toContainEqual(
+      expect.objectContaining({
+        storeId: storeTwoId,
+        total: 0,
+        pricesAsOf: null,
+        missingItems: [
+          { productId: milkId, name: "Milk" },
+          { productId: breadId, name: "Bread" },
+        ],
+        coveredItemCount: 0,
+        itemCount: 2,
+      }),
+    );
+  });
+
   it("upserts watches for finalized cart items with winning-store baselines", async () => {
     const db = new FakeCartDb();
     const cart = await db.getOrCreateActiveCart(deviceId);

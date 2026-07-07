@@ -536,13 +536,13 @@ class DrizzleCartwiseDb implements CartwiseDb {
         storeProductId: row.storeProductId,
         externalProductId: row.externalProductId,
         store: row.store as StoreRow,
-        price: row.priceId
+        price: row.priceId && row.capturedAt
           ? {
               id: row.priceId,
               storeProductId: row.priceStoreProductId ?? row.storeProductId,
               price: row.price,
               promoPrice: row.promoPrice,
-              capturedAt: row.capturedAt ?? new Date(0),
+              capturedAt: row.capturedAt,
               source: row.source as ChainSlug,
             }
           : null,

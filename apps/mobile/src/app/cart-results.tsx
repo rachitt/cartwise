@@ -1,4 +1,10 @@
-import type { CartBillLine, CartOptimization, Store, StoreCartTotal } from '@cartwise/shared';
+import {
+  OPTIMIZER_MIN_COVERAGE,
+  type CartBillLine,
+  type CartOptimization,
+  type Store,
+  type StoreCartTotal,
+} from '@cartwise/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { router } from 'expo-router';
@@ -63,6 +69,19 @@ export default function CartResultsScreen() {
   const rankedStoreTotals = useMemo(
     () => rankStoreTotals(optimization, storeById),
     [optimization, storeById],
+  );
+  const coveredStoreTotals = useMemo(
+    () => rankedStoreTotals.filter(isCoveredStoreTotal),
+    [rankedStoreTotals],
+  );
+  const cheapestCoveredStoreId = coveredStoreTotals[0]?.storeId ?? null;
+  const worstCoveredTotal = useMemo(
+    () => coveredStoreTotals.reduce<number | null>(
+      (highestTotal, storeTotal) =>
+        highestTotal === null ? storeTotal.total : Math.max(highestTotal, storeTotal.total),
+      null,
+    ),
+    [coveredStoreTotals],
   );
   const selectedStoreTotal =
     selectedStoreId === null
@@ -132,17 +151,17 @@ export default function CartResultsScreen() {
           <View style={styles.sectionHeader}>
             <ThemedText type="eyebrow">RANKED STORES</ThemedText>
             <ThemedText type="caption" themeColor="textSecondary">
-              Sorted by total bill
+              Covered stores first
             </ThemedText>
           </View>
           <View style={styles.storeCardStack}>
-            {rankedStoreTotals.map((storeTotal, index) => (
+            {rankedStoreTotals.map((storeTotal) => (
               <StoreTotalCard
                 key={storeTotal.storeId}
-                isCheapest={index === 0}
+                isCheapest={storeTotal.storeId === cheapestCoveredStoreId}
                 store={storeById.get(storeTotal.storeId)}
                 storeTotal={storeTotal}
-                worstTotal={optimization.worstTotal}
+                savingsBaseline={worstCoveredTotal}
                 onPress={() => setSelectedStoreId(storeTotal.storeId)}
               />
             ))}
@@ -192,7 +211,7 @@ function StoreBillDetail({
           {storeTotal.substitutionCount > 0 ? (
             <Chip label={formatSubstitutions(storeTotal.substitutionCount)} tone="deal" />
           ) : null}
-          <FreshnessStamp capturedAt={storeTotal.pricesAsOf} />
+          <StoreFreshness storeTotal={storeTotal} />
         </View>
       </Card>
 
@@ -222,20 +241,21 @@ function StoreBillDetail({
         <View style={styles.section}>
           <ThemedText type="eyebrow">MISSING ITEMS</ThemedText>
           <Card flush>
-            {storeTotal.missingItems.map((productId, index) => {
-              const product = productById.get(productId);
+            {storeTotal.missingItems.map((missingItem, index) => {
+              const product = productById.get(missingItem.productId);
+              const productName = displayMissingItemName(missingItem, product);
 
               return (
                 <View
-                  key={productId}
+                  key={missingItem.productId}
                   style={[
                     styles.missingRow,
                     index < storeTotal.missingItems.length - 1 && styles.rowSeparator,
                   ]}>
-                  <ProductThumb imageUrl={product?.imageUrl ?? null} name={product?.name ?? productId} size={40} />
+                  <ProductThumb imageUrl={product?.imageUrl ?? null} name={productName} size={40} />
                   <View style={styles.missingCopy}>
                     <ThemedText type="smallBold" numberOfLines={2}>
-                      {product?.name ?? formatProductId(productId)}
+                      {productName}
                     </ThemedText>
                     <ThemedText type="caption" themeColor="textSecondary">
                       Not found at this store
@@ -255,17 +275,20 @@ function StoreTotalCard({
   isCheapest,
   store,
   storeTotal,
-  worstTotal,
+  savingsBaseline,
   onPress,
 }: {
   isCheapest: boolean;
   store?: Store;
   storeTotal: StoreCartTotal;
-  worstTotal: number;
+  savingsBaseline: number | null;
   onPress: () => void;
 }) {
   const theme = useTheme();
-  const savings = Math.max(0, worstTotal - storeTotal.total);
+  const isCovered = isCoveredStoreTotal(storeTotal);
+  const savings = isCovered && savingsBaseline !== null
+    ? Math.max(0, savingsBaseline - storeTotal.total)
+    : 0;
 
   return (
     <Pressable
@@ -307,7 +330,7 @@ function StoreTotalCard({
             {savings > 0 ? (
               <Chip label={`Saves ${formatPrice(savings)}`} tone="deal" />
             ) : null}
-            <FreshnessStamp capturedAt={storeTotal.pricesAsOf} />
+            <StoreFreshness storeTotal={storeTotal} />
           </View>
         </View>
 
@@ -327,6 +350,14 @@ function StoreTotalCard({
   );
 }
 
+function StoreFreshness({ storeTotal }: { storeTotal: StoreCartTotal }) {
+  if (storeTotal.lines.length === 0 || !storeTotal.pricesAsOf) {
+    return <Chip label="No prices" tone="neutral" />;
+  }
+
+  return <FreshnessStamp capturedAt={storeTotal.pricesAsOf} />;
+}
+
 function BillLineRow({
   line,
   product,
@@ -337,7 +368,7 @@ function BillLineRow({
   showSeparator: boolean;
 }) {
   const theme = useTheme();
-  const productName = product?.name ?? formatProductId(line.productId);
+  const productName = product?.name ?? line.productName ?? formatProductId(line.productId);
   const size = product ? formatProductSize(product.sizeQty, product.sizeUnit) : null;
   const meta = [product?.brand, size, `Qty ${line.qty} x ${formatPrice(line.unitPrice)}`]
     .filter(Boolean)
@@ -426,6 +457,17 @@ function ResultsSkeleton() {
   );
 }
 
+function displayMissingItemName(
+  missingItem: StoreCartTotal['missingItems'][number],
+  product?: CartItem['product'],
+) {
+  const productName = product?.name.trim() ?? '';
+  const missingName = missingItem.name.trim();
+  const name = productName || missingName;
+
+  return name.length > 0 ? name : 'Missing item';
+}
+
 function rankStoreTotals(
   optimization: CartOptimization | undefined,
   storeById: ReadonlyMap<string, Store>,
@@ -437,6 +479,20 @@ function rankStoreTotals(
   return [...optimization.perStoreTotals].sort((first, second) => {
     const firstStore = storeById.get(first.storeId);
     const secondStore = storeById.get(second.storeId);
+    const firstCovered = isCoveredStoreTotal(first);
+    const secondCovered = isCoveredStoreTotal(second);
+
+    if (firstCovered !== secondCovered) {
+      return firstCovered ? -1 : 1;
+    }
+
+    if (!firstCovered && !secondCovered) {
+      return (
+        coverageRatio(second) - coverageRatio(first) ||
+        first.total - second.total ||
+        (firstStore?.name ?? first.storeId).localeCompare(secondStore?.name ?? second.storeId)
+      );
+    }
 
     return (
       first.total - second.total ||
@@ -444,6 +500,14 @@ function rankStoreTotals(
       (firstStore?.name ?? first.storeId).localeCompare(secondStore?.name ?? second.storeId)
     );
   });
+}
+
+function isCoveredStoreTotal(storeTotal: StoreCartTotal) {
+  return storeTotal.lines.length > 0 && coverageRatio(storeTotal) >= OPTIMIZER_MIN_COVERAGE;
+}
+
+function coverageRatio(storeTotal: StoreCartTotal) {
+  return storeTotal.itemCount <= 0 ? 0 : storeTotal.coveredItemCount / storeTotal.itemCount;
 }
 
 function formatStoreMeta(store: Store | undefined) {

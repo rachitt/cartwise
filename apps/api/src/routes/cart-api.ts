@@ -29,6 +29,7 @@ const finalizeBodySchema = z.object({
 });
 const billLineResponseSchema = z.object({
   productId: z.string(),
+  productName: z.string().optional(),
   substitutedProductId: z.string().optional(),
   substitutedProductName: z.string().optional(),
   qty: z.number().int().min(1),
@@ -36,12 +37,16 @@ const billLineResponseSchema = z.object({
   lineTotal: z.number().nonnegative(),
   capturedAt: z.string().datetime(),
 });
+const missingItemResponseSchema = z.object({
+  productId: z.string(),
+  name: z.string(),
+});
 const storeTotalResponseSchema = z.object({
   storeId: z.string(),
   total: z.number().nonnegative(),
-  missingItems: z.array(z.string()),
+  missingItems: z.array(missingItemResponseSchema),
   lines: z.array(billLineResponseSchema),
-  pricesAsOf: z.string().datetime(),
+  pricesAsOf: z.string().datetime().nullable(),
   coveredItemCount: z.number().int().nonnegative(),
   itemCount: z.number().int().nonnegative(),
   substitutionCount: z.number().int().nonnegative(),
@@ -70,7 +75,7 @@ const cartOptimizationResponseSchema = z.object({
       matchConfidence: z.number().min(0).max(1),
     }),
   ),
-  pricesAsOf: z.string().datetime(),
+  pricesAsOf: z.string().datetime().nullable(),
 });
 
 export interface CartApiDeps {
@@ -153,7 +158,11 @@ export const cartApiPlugin: FastifyPluginAsync<CartApiDeps> = async (app, deps) 
 
     try {
       const optimization = optimizeCart({
-        items: cart.items.map((item) => ({ productId: item.productId, qty: item.qty })),
+        items: cart.items.map((item) => ({
+          productId: item.productId,
+          qty: item.qty,
+          name: item.product.name,
+        })),
         prices: cartPrices,
         stores: stores.map(toStore),
         alternatives,

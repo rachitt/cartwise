@@ -1,8 +1,10 @@
 import {
   type CartBillLine,
   MIN_SWAP_CONFIDENCE,
+  OPTIMIZER_MIN_COVERAGE,
   type CartOptimization,
   type MatchTier,
+  type MissingCartItem,
   type Product,
   type ProductComparison,
   type Store,
@@ -12,8 +14,10 @@ import {
 
 import { toComparableSize } from "../catalog/size.js";
 
+type OptimizerItem = { productId: string; qty: number; name?: string };
+
 export interface OptimizerInput {
-  items: Array<{ productId: string; qty: number }>;
+  items: OptimizerItem[];
   prices: StorePrice[];
   stores: Store[];
   alternatives: Record<string, Array<{ product: Product; prices: StorePrice[]; comparison?: ProductComparison }>>;
@@ -29,7 +33,7 @@ export class OptimizerError extends Error {
 interface StoreCandidate {
   store: Store;
   totalCents: number;
-  missingItems: string[];
+  missingItems: MissingCartItem[];
   lines: CartBillLine[];
   usedPrices: StorePrice[];
 }
@@ -44,7 +48,6 @@ interface BillLineCandidate {
 const CHEAPER_ELSEWHERE_MIN_CENTS = 30;
 const CHEAPER_ELSEWHERE_MIN_RATIO = 0.05;
 const SWAP_MIN_LINE_SAVINGS_CENTS = 50;
-const MIN_COVERAGE = 0.7;
 
 export function optimizeCart(input: OptimizerInput): CartOptimization {
   const items = input.items.filter((item) => item.qty > 0);
@@ -57,7 +60,7 @@ export function optimizeCart(input: OptimizerInput): CartOptimization {
   const candidates = input.stores.map((store) =>
     buildStoreCandidate(store, items, priceIndex, input.alternatives),
   );
-  const winningPool = candidates.filter((candidate) => coverage(candidate, items.length) >= MIN_COVERAGE);
+  const winningPool = candidates.filter((candidate) => isCoveredCandidate(candidate, items.length));
   const eligibleCandidates = winningPool.length > 0 ? winningPool : highestCoverageCandidates(candidates, items.length);
 
   if (eligibleCandidates.length === 0) {
@@ -65,7 +68,8 @@ export function optimizeCart(input: OptimizerInput): CartOptimization {
   }
 
   const winningCandidate = [...eligibleCandidates].sort(compareStoreCandidates)[0];
-  const worstTotalCents = Math.max(...candidates.map((candidate) => candidate.totalCents));
+  const baselineCandidates = winningPool.length > 0 ? winningPool : [winningCandidate];
+  const worstTotalCents = Math.max(...baselineCandidates.map((candidate) => candidate.totalCents));
   const savingsCents = Math.max(0, worstTotalCents - winningCandidate.totalCents);
 
   return {
@@ -73,7 +77,7 @@ export function optimizeCart(input: OptimizerInput): CartOptimization {
     winningTotal: centsToMoney(winningCandidate.totalCents),
     worstTotal: centsToMoney(worstTotalCents),
     savings: centsToMoney(savingsCents),
-    perStoreTotals: candidates.map((candidate) => ({
+    perStoreTotals: [...candidates].sort((left, right) => compareStoreCandidatesForRanking(left, right, items.length)).map((candidate) => ({
       storeId: candidate.store.id,
       total: centsToMoney(candidate.totalCents),
       missingItems: candidate.missingItems,
@@ -91,19 +95,19 @@ export function optimizeCart(input: OptimizerInput): CartOptimization {
 
 function buildStoreCandidate(
   store: Store,
-  items: Array<{ productId: string; qty: number }>,
+  items: OptimizerItem[],
   priceIndex: Map<string, StorePrice>,
   alternatives: OptimizerInput["alternatives"],
 ): StoreCandidate {
   let totalCents = 0;
-  const missingItems: string[] = [];
+  const missingItems: MissingCartItem[] = [];
   const lines: CartBillLine[] = [];
   const usedPrices: StorePrice[] = [];
 
   for (const item of items) {
     const line = buildBillLine(store.id, item, priceIndex, alternatives[item.productId] ?? []);
     if (!line) {
-      missingItems.push(item.productId);
+      missingItems.push(missingCartItem(item, alternatives[item.productId] ?? []));
       continue;
     }
 
@@ -117,7 +121,7 @@ function buildStoreCandidate(
 
 function buildBillLine(
   storeId: string,
-  item: { productId: string; qty: number },
+  item: OptimizerItem,
   priceIndex: Map<string, StorePrice>,
   alternatives: OptimizerInput["alternatives"][string],
 ): BillLineCandidate | null {
@@ -151,7 +155,7 @@ function buildBillLine(
 
 function bestAlternativeLine(
   storeId: string,
-  item: { productId: string; qty: number },
+  item: OptimizerItem,
   alternatives: OptimizerInput["alternatives"][string],
   allowedTiers: ReadonlySet<MatchTier>,
   isSubstitution: boolean,
@@ -195,7 +199,7 @@ function bestAlternativeLine(
 }
 
 function toBillLineCandidate(
-  item: { productId: string; qty: number },
+  item: OptimizerItem,
   price: StorePrice,
   tier: MatchTier,
   substitutedProductId?: string,
@@ -212,6 +216,7 @@ function toBillLineCandidate(
   return {
     line: {
       productId: item.productId,
+      ...(item.name ? { productName: item.name } : {}),
       ...(substitutedProductId ? { substitutedProductId } : {}),
       ...(substitutedProductName ? { substitutedProductName } : {}),
       qty: item.qty,
@@ -256,8 +261,39 @@ function compareStoreCandidates(left: StoreCandidate, right: StoreCandidate): nu
   );
 }
 
+function compareStoreCandidatesForRanking(
+  left: StoreCandidate,
+  right: StoreCandidate,
+  itemCount: number,
+): number {
+  const leftCovered = isCoveredCandidate(left, itemCount);
+  const rightCovered = isCoveredCandidate(right, itemCount);
+
+  if (leftCovered !== rightCovered) {
+    return leftCovered ? -1 : 1;
+  }
+
+  if (leftCovered && rightCovered) {
+    return compareStoreCandidates(left, right);
+  }
+
+  return (
+    coverage(right, itemCount) - coverage(left, itemCount) ||
+    left.totalCents - right.totalCents ||
+    left.store.name.localeCompare(right.store.name)
+  );
+}
+
 function coverage(candidate: StoreCandidate, itemCount: number): number {
+  if (itemCount <= 0) {
+    return 0;
+  }
+
   return (itemCount - candidate.missingItems.length) / itemCount;
+}
+
+function isCoveredCandidate(candidate: StoreCandidate, itemCount: number): boolean {
+  return candidate.lines.length > 0 && coverage(candidate, itemCount) >= OPTIMIZER_MIN_COVERAGE;
 }
 
 function highestCoverageCandidates(
@@ -269,7 +305,7 @@ function highestCoverageCandidates(
 }
 
 function buildCheaperElsewhere(
-  items: Array<{ productId: string; qty: number }>,
+  items: OptimizerItem[],
   stores: Store[],
   winningStoreId: string,
   priceIndex: Map<string, StorePrice>,
@@ -338,7 +374,7 @@ function buildCheaperElsewhere(
 }
 
 function buildSwapSuggestions(
-  items: Array<{ productId: string; qty: number }>,
+  items: OptimizerItem[],
   winningStoreId: string,
   priceIndex: Map<string, StorePrice>,
   alternatives: OptimizerInput["alternatives"],
@@ -441,6 +477,16 @@ function buildSwapSuggestions(
   return suggestions;
 }
 
+function missingCartItem(
+  item: OptimizerItem,
+  alternatives: OptimizerInput["alternatives"][string],
+): MissingCartItem {
+  return {
+    productId: item.productId,
+    name: item.name ?? alternatives.find((alternative) => alternative.product.id === item.productId)?.product.name ?? item.productId,
+  };
+}
+
 function indexPrices(prices: StorePrice[]): Map<string, StorePrice> {
   const index = new Map<string, StorePrice>();
 
@@ -460,9 +506,9 @@ function indexPrices(prices: StorePrice[]): Map<string, StorePrice> {
   return index;
 }
 
-function oldestCapturedAt(prices: StorePrice[]): string {
+function oldestCapturedAt(prices: StorePrice[]): string | null {
   if (prices.length === 0) {
-    return new Date(0).toISOString();
+    return null;
   }
 
   return prices
