@@ -14,6 +14,7 @@ import { z } from "zod";
 import { createCache, type Cache, type CacheResult } from "../cache.js";
 import { compareProducts } from "../catalog/compare.js";
 import { upsertCollectedProduct } from "../catalog/matcher.js";
+import { recordCollectorOutcome } from "../collectors/health.js";
 import type { CollectedProduct, Collector } from "../collectors/types.js";
 import type { CartwiseDb, LatestProductStorePriceRow, ProductRow } from "../db/repository.js";
 import { compareSearchableProducts, searchRelevanceScore } from "../search/relevance.js";
@@ -27,6 +28,7 @@ const PRODUCTS_TTL_SECONDS = 6 * 60 * 60;
 const storesQuerySchema = z.object({
   zip: z.string().regex(/^\d{5}$/),
 });
+const coverageQuerySchema = storesQuerySchema;
 
 const storeIdsSchema = z.string().transform((value, context) => {
   const storeIds = value
@@ -90,8 +92,33 @@ interface SearchCacheItem {
   match?: ProductMatch;
 }
 
+interface CollectorHealthLogger {
+  error(payload: Record<string, unknown>, message?: string): void;
+  info?(payload: Record<string, unknown>, message?: string): void;
+}
+
 export const priceApiPlugin: FastifyPluginAsync<PriceApiDeps> = async (app, deps) => {
   const cache = deps.cache ?? createCache(deps.db);
+
+  app.get("/v1/coverage", async (request, reply) => {
+    const query = parseOr400(coverageQuerySchema, request.query, reply);
+    if (!query) {
+      return reply;
+    }
+
+    const { stores, sources } = await collectStoresForZip(deps, cache, query.zip, app.log);
+    const chains = Array.from(new Set(stores.map((store) => store.chain))).sort();
+
+    if (shouldReturnCollectorFailure(sources)) {
+      return reply.code(503).send({ error: "Collectors unavailable", sources });
+    }
+
+    return {
+      supported: stores.length >= 2 && chains.length >= 2,
+      chains,
+      storeCount: stores.length,
+    };
+  });
 
   app.get("/stores", async (request, reply) => {
     const query = parseOr400(storesQuerySchema, request.query, reply);
@@ -99,41 +126,13 @@ export const priceApiPlugin: FastifyPluginAsync<PriceApiDeps> = async (app, deps
       return reply;
     }
 
-    const stores: Store[] = [];
-    const sources: ResponseSource[] = [];
-
-    for (const chain of CHAINS) {
-      const collector = deps.getCollector(chain);
-      if (!collector) {
-        sources.push({ chain, status: "unavailable" });
-        continue;
-      }
-
-      const result = await collectWithSource(
-        sources,
-        chain,
-        cache,
-        `stores:${chain}:${query.zip}`,
-        STORES_TTL_SECONDS,
-        () => collector.findStores(query.zip),
-      );
-      if (!result) {
-        continue;
-      }
-
-      for (const collectedStore of result.value) {
-        const row = await deps.db.upsertStore(chain, collectedStore);
-        stores.push(toStore(row));
-      }
-    }
-
-    const nearbyStores = filterNearbyStores(stores, query.zip);
+    const { stores, sources } = await collectStoresForZip(deps, cache, query.zip, app.log);
 
     if (shouldReturnCollectorFailure(sources)) {
       return reply.code(503).send({ error: "Collectors unavailable", sources });
     }
 
-    return { stores: nearbyStores, sources };
+    return { stores, sources };
   });
 
   app.get("/search", async (request, reply) => {
@@ -197,6 +196,7 @@ export const priceApiPlugin: FastifyPluginAsync<PriceApiDeps> = async (app, deps
 
           return matchedProducts;
         },
+        app.log,
       );
       if (!result) {
         continue;
@@ -302,6 +302,7 @@ export const priceApiPlugin: FastifyPluginAsync<PriceApiDeps> = async (app, deps
 
           return collectedProducts;
         },
+        app.log,
       );
       if (!result) {
         continue;
@@ -367,6 +368,44 @@ async function getComparableProducts(
     .slice(0, 5);
 }
 
+async function collectStoresForZip(
+  deps: Pick<PriceApiDeps, "db" | "getCollector">,
+  cache: Cache,
+  zip: string,
+  logger?: CollectorHealthLogger,
+): Promise<{ stores: Store[]; sources: ResponseSource[] }> {
+  const stores: Store[] = [];
+  const sources: ResponseSource[] = [];
+
+  for (const chain of CHAINS) {
+    const collector = deps.getCollector(chain);
+    if (!collector) {
+      sources.push({ chain, status: "unavailable" });
+      continue;
+    }
+
+    const result = await collectWithSource(
+      sources,
+      chain,
+      cache,
+      `stores:${chain}:${zip}`,
+      STORES_TTL_SECONDS,
+      () => collector.findStores(zip),
+      logger,
+    );
+    if (!result) {
+      continue;
+    }
+
+    for (const collectedStore of result.value) {
+      const row = await deps.db.upsertStore(chain, collectedStore);
+      stores.push(toStore(row));
+    }
+  }
+
+  return { stores: filterNearbyStores(stores, zip), sources };
+}
+
 async function collectWithSource<T>(
   sources: ResponseSource[],
   chain: ChainSlug,
@@ -374,18 +413,22 @@ async function collectWithSource<T>(
   key: string,
   ttlSeconds: number,
   fn: () => Promise<T>,
+  logger?: CollectorHealthLogger,
 ): Promise<CacheResult<T> | null> {
   try {
     const result = cache.withCacheMeta
       ? await cache.withCacheMeta(key, ttlSeconds, fn)
       : { value: await cache.withCache(key, ttlSeconds, fn), fresh: true, capturedAt: new Date() };
+    const status = result.fresh ? "live" : "stale";
+    recordCollectorOutcome(chain, status, result.error, logger);
     sources.push({
       chain,
-      status: result.fresh ? "live" : "stale",
+      status,
       capturedAt: result.capturedAt.toISOString(),
     });
     return result;
-  } catch {
+  } catch (error) {
+    recordCollectorOutcome(chain, "error", error, logger);
     sources.push({ chain, status: "error" });
     return null;
   }

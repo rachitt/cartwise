@@ -106,7 +106,7 @@ export function useMarkAlertRead() {
 
   return useMutation({
     mutationFn: markAlertRead,
-    onSuccess: (updatedAlert) => {
+    onSuccess: (_updatedAlert, alertId) => {
       queryClient.setQueryData<AlertsResponse>(alertsQueryKey, (current) => {
         if (!current) {
           return current;
@@ -115,7 +115,7 @@ export function useMarkAlertRead() {
         return {
           ...current,
           alerts: current.alerts.map((alert) =>
-            alert.id === updatedAlert.id ? updatedAlert : alert,
+            alert.id === alertId ? { ...alert, read: true } : alert,
           ),
         };
       });

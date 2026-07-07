@@ -1,5 +1,6 @@
 import type {
   CartOptimization,
+  ChainSlug,
   Product,
   ProductComparison,
   ProductMatchSummary,
@@ -10,9 +11,15 @@ import Constants from 'expo-constants';
 
 import { getDeviceId } from '@/lib/device-id';
 
-export type StoresResponse = { stores: Store[] };
+export type SourceStatus = 'live' | 'stale' | 'error' | 'unavailable';
+export type ResponseSource = {
+  chain: ChainSlug;
+  status: SourceStatus;
+  capturedAt?: string;
+};
+export type StoresResponse = { stores: Store[]; sources?: ResponseSource[] };
 export type SearchResult = { product: Product; prices: StorePrice[]; match?: ProductMatchSummary };
-export type SearchResponse = { results: SearchResult[] };
+export type SearchResponse = { results: SearchResult[]; sources?: ResponseSource[] };
 export type ComparableProductResult = {
   product: Product;
   prices: StorePrice[];
@@ -22,15 +29,19 @@ export type ProductPricesResponse = {
   product: Product;
   prices: StorePrice[];
   comparable: ComparableProductResult[];
+  sources?: ResponseSource[];
 };
+export type CoverageResponse = { supported: boolean; chains: ChainSlug[]; storeCount: number };
 export type CartStatus = 'open' | 'finalized';
 export type CartItem = { productId: string; qty: number; product: Product };
 export type Cart = { id: string; status: CartStatus; items: CartItem[] };
 export type CartResponse = { cart: Cart };
 export type PriceAlert = {
   id: string;
+  storeId: string;
   productName: string;
   storeName: string;
+  storeChain?: ChainSlug;
   oldPrice: number;
   newPrice: number;
   capturedAt: string;
@@ -45,6 +56,42 @@ export type PriceWatch = {
 };
 export type AlertsResponse = { alerts: PriceAlert[]; watches: PriceWatch[] };
 export type PushTokenResponse = { ok: true };
+
+type ApiProductSummary = {
+  id: string;
+  name: string;
+  brand?: string | null;
+};
+
+type ApiStoreSummary = {
+  id: string;
+  name: string;
+  chain: ChainSlug;
+};
+
+type ApiPriceAlert = {
+  id: string;
+  storeId?: string;
+  productName?: string;
+  storeName?: string;
+  product?: ApiProductSummary;
+  store?: ApiStoreSummary;
+  oldPrice: number;
+  newPrice: number;
+  capturedAt: string;
+  read: boolean;
+};
+
+type ApiPriceWatch = {
+  id: string;
+  productName?: string;
+  product?: ApiProductSummary;
+  baselinePrice: number;
+  active: boolean;
+  storeIds: string[];
+};
+
+type ApiAlertsResponse = { alerts: ApiPriceAlert[]; watches: ApiPriceWatch[] };
 
 const DEV_API_FALLBACK_URL = 'http://localhost:3000';
 const API_URL = resolveApiUrl();
@@ -131,6 +178,11 @@ export function getStores(zip: string) {
   return requestJson<StoresResponse>(`/stores?${params.toString()}`);
 }
 
+export function getCoverage(zip: string) {
+  const params = new URLSearchParams({ zip });
+  return requestJson<CoverageResponse>(`/v1/coverage?${params.toString()}`);
+}
+
 export function searchProducts(query: string, storeIds: string[]) {
   const params = new URLSearchParams({ q: query, storeIds: toStoreIdsParam(storeIds) });
   return requestJson<SearchResponse>(`/search?${params.toString()}`);
@@ -178,14 +230,35 @@ export function registerPushToken(expoPushToken: string) {
   });
 }
 
-export function getAlerts() {
-  return requestJson<AlertsResponse>('/alerts', {
+export async function getAlerts() {
+  const response = await requestJson<ApiAlertsResponse>('/alerts', {
     requiresDeviceId: true,
   });
+
+  return {
+    alerts: response.alerts.map((alert) => ({
+      id: alert.id,
+      storeId: alert.storeId ?? alert.store?.id ?? '',
+      productName: alert.productName ?? alert.product?.name ?? 'Watched item',
+      storeName: alert.storeName ?? alert.store?.name ?? 'Selected store',
+      storeChain: alert.store?.chain,
+      oldPrice: alert.oldPrice,
+      newPrice: alert.newPrice,
+      capturedAt: alert.capturedAt,
+      read: alert.read,
+    })),
+    watches: response.watches.map((watch) => ({
+      id: watch.id,
+      productName: watch.productName ?? watch.product?.name ?? 'Watched item',
+      baselinePrice: watch.baselinePrice,
+      active: watch.active,
+      storeIds: watch.storeIds,
+    })),
+  } satisfies AlertsResponse;
 }
 
 export function markAlertRead(alertId: string) {
-  return requestJson<PriceAlert>(`/alerts/${alertId}/read`, {
+  return requestJson<PushTokenResponse>(`/alerts/${alertId}/read`, {
     method: 'PUT',
     requiresDeviceId: true,
   });

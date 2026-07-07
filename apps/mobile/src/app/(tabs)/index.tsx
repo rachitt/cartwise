@@ -19,6 +19,7 @@ import Animated, {
 
 import { useCurrentCart, useSearchProducts, useStores, useUpdateCartItem } from '@/api/queries';
 import { BrandFirstSearchResults } from '@/components/search/brand-first-results';
+import { SourceStatusBanner } from '@/components/source-status-banner';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Card } from '@/components/ui/card';
@@ -188,6 +189,10 @@ export default function SearchScreen() {
                   {pricedResults.length} priced items
                 </ThemedText>
               </View>
+            ) : null}
+
+            {hasSearch ? (
+              <SourceStatusBanner sources={searchQuery.data?.sources} stores={activeStores} />
             ) : null}
 
             {hasSearch && searchQuery.isLoading ? (

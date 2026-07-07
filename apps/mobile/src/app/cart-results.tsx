@@ -15,6 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import type { CartItem } from '@/api/client';
 import { cartOptimizationQueryKey, useCurrentCart, useStores } from '@/api/queries';
+import { SourceStatusBanner } from '@/components/source-status-banner';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Card } from '@/components/ui/card';
@@ -110,6 +111,8 @@ export default function CartResultsScreen() {
       <TopBar />
 
       <HeroCard optimization={optimization} winningStore={winningStore} />
+
+      <SourceStatusBanner sources={storesQuery.data?.sources} stores={stores} />
 
       {cartQuery.isLoading || storesQuery.isLoading ? (
         <ResultsSkeleton />
@@ -406,7 +409,11 @@ function groupCheaperElsewhere(optimization?: CartOptimization) {
 
 function formatStoreTotalMeta(store: Store | undefined, missingItems: number) {
   const label = store ? chainLabel(store.chain) : 'Selected store';
-  return missingItems > 0 ? `${label} · ${formatMissingItems(missingItems)}` : label;
+  const distance = store?.distanceMiles === undefined ? null : `${store.distanceMiles.toFixed(1)} mi`;
+
+  return [label, distance, missingItems > 0 ? formatMissingItems(missingItems) : null]
+    .filter(Boolean)
+    .join(' · ');
 }
 
 function formatMissingItems(count: number) {

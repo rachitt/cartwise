@@ -4,6 +4,7 @@ import { ActivityIndicator, Keyboard, StyleSheet, TextInput, View } from 'react-
 import Animated, { FadeIn, FadeInDown, useReducedMotion } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { getCoverage, type CoverageResponse } from '@/api/client';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { AppButton } from '@/components/ui/button';
@@ -14,11 +15,16 @@ import { usePreferencesStore } from '@/state/preferences';
 
 const entranceDelay = [0, 70, 140, 220] as const;
 
+type UnsupportedCoverage = CoverageResponse & { zip: string };
+
 export function OnboardingFlow() {
   const persistedZip = usePreferencesStore((state) => state.zip);
   const confirmLocation = usePreferencesStore((state) => state.confirmLocation);
   const [zipInput, setZipInput] = useState(persistedZip);
   const [locationError, setLocationError] = useState<string | null>(null);
+  const [coverageError, setCoverageError] = useState<string | null>(null);
+  const [unsupportedCoverage, setUnsupportedCoverage] = useState<UnsupportedCoverage | null>(null);
+  const [checkingCoverage, setCheckingCoverage] = useState(false);
   const [resolvingLocation, setResolvingLocation] = useState(false);
   const theme = useTheme();
   const reducedMotion = useReducedMotion();
@@ -59,8 +65,7 @@ export function OnboardingFlow() {
       }
 
       setZipInput(postalCode);
-      confirmLocation(postalCode);
-      Keyboard.dismiss();
+      await continueWithZip(postalCode);
     } catch (error) {
       setLocationError(getErrorMessage(error));
     } finally {
@@ -68,14 +73,41 @@ export function OnboardingFlow() {
     }
   }
 
-  function submitZip() {
+  async function submitZip() {
     if (!zipIsValid) {
       return;
     }
 
+    await continueWithZip(zipInput);
+  }
+
+  async function continueWithZip(zip: string, skipCoverage = false) {
+    if (!/^\d{5}$/.test(zip)) {
+      return;
+    }
+
     setLocationError(null);
-    confirmLocation(zipInput);
-    Keyboard.dismiss();
+    setCoverageError(null);
+    setCheckingCoverage(true);
+
+    try {
+      if (!skipCoverage) {
+        const coverage = await getCoverage(zip);
+
+        if (!coverage.supported) {
+          Keyboard.dismiss();
+          setUnsupportedCoverage({ ...coverage, zip });
+          return;
+        }
+      }
+
+      confirmLocation(zip);
+      Keyboard.dismiss();
+    } catch {
+      setCoverageError('Cartwise could not check coverage for this ZIP.');
+    } finally {
+      setCheckingCoverage(false);
+    }
   }
 
   return (
@@ -100,67 +132,122 @@ export function OnboardingFlow() {
             </Animated.View>
           </View>
 
-          <Animated.View entering={getEntrance(reducedMotion, 3)}>
-            <Card style={styles.locationCard}>
-              <LocationButton
-                busy={resolvingLocation}
-                label="Use my location"
-                onPress={useCurrentLocation}
+          {unsupportedCoverage ? (
+            <Animated.View entering={getEntrance(reducedMotion, 3)}>
+              <UnsupportedCoverageCard
+                coverage={unsupportedCoverage}
+                onBrowseAnyway={() => continueWithZip(unsupportedCoverage.zip, true)}
+                onTryAnotherZip={() => {
+                  setUnsupportedCoverage(null);
+                  setCoverageError(null);
+                }}
               />
+            </Animated.View>
+          ) : (
+            <Animated.View entering={getEntrance(reducedMotion, 3)}>
+              <Card style={styles.locationCard}>
+                <LocationButton
+                  busy={resolvingLocation}
+                  label="Use my location"
+                  onPress={useCurrentLocation}
+                />
 
-              <View style={styles.dividerRow}>
-                <View style={[styles.divider, { backgroundColor: theme.border }]} />
-                <ThemedText type="caption" themeColor="textSecondary">
-                  or enter a ZIP
-                </ThemedText>
-                <View style={[styles.divider, { backgroundColor: theme.border }]} />
-              </View>
+                <View style={styles.dividerRow}>
+                  <View style={[styles.divider, { backgroundColor: theme.border }]} />
+                  <ThemedText type="caption" themeColor="textSecondary">
+                    or enter a ZIP
+                  </ThemedText>
+                  <View style={[styles.divider, { backgroundColor: theme.border }]} />
+                </View>
 
-              <TextInput
-                accessibilityLabel="ZIP code"
-                autoComplete="postal-code"
-                inputMode="numeric"
-                keyboardType="number-pad"
-                maxLength={5}
-                onSubmitEditing={submitZip}
-                placeholder="45202"
-                placeholderTextColor={theme.textSecondary}
-                returnKeyType="done"
-                textContentType="postalCode"
-                value={zipInput}
-                onChangeText={(value) => setZipInput(value.replace(/\D/g, '').slice(0, 5))}
-                style={[
-                  styles.input,
-                  {
-                    color: theme.text,
-                    borderColor: zipIsValid || zipInput.length === 0 ? theme.border : theme.danger,
-                    backgroundColor: theme.backgroundElement,
-                  },
-                ]}
-              />
-              {zipInput.length > 0 && !zipIsValid ? (
-                <ThemedText type="small" themeColor="danger">
-                  Enter a 5-digit ZIP code.
-                </ThemedText>
-              ) : null}
-              {locationError ? (
-                <ThemedText type="small" themeColor="danger">
-                  {locationError}
-                </ThemedText>
-              ) : null}
-              <AppButton
-                label="Continue"
-                variant="secondary"
-                size="lg"
-                disabled={!zipIsValid}
-                haptic="success"
-                onPress={submitZip}
-              />
-            </Card>
-          </Animated.View>
+                <TextInput
+                  accessibilityLabel="ZIP code"
+                  autoComplete="postal-code"
+                  inputMode="numeric"
+                  keyboardType="number-pad"
+                  maxLength={5}
+                  onSubmitEditing={submitZip}
+                  placeholder="45202"
+                  placeholderTextColor={theme.textSecondary}
+                  returnKeyType="done"
+                  textContentType="postalCode"
+                  value={zipInput}
+                  onChangeText={(value) => {
+                    setZipInput(value.replace(/\D/g, '').slice(0, 5));
+                    setCoverageError(null);
+                  }}
+                  style={[
+                    styles.input,
+                    {
+                      color: theme.text,
+                      borderColor: zipIsValid || zipInput.length === 0 ? theme.border : theme.danger,
+                      backgroundColor: theme.backgroundElement,
+                    },
+                  ]}
+                />
+                {zipInput.length > 0 && !zipIsValid ? (
+                  <ThemedText type="small" themeColor="danger">
+                    Enter a 5-digit ZIP code.
+                  </ThemedText>
+                ) : null}
+                {locationError ? (
+                  <ThemedText type="small" themeColor="danger">
+                    {locationError}
+                  </ThemedText>
+                ) : null}
+                {coverageError ? (
+                  <ThemedText type="small" themeColor="danger">
+                    {coverageError}
+                  </ThemedText>
+                ) : null}
+                <AppButton
+                  label="Continue"
+                  variant="secondary"
+                  size="lg"
+                  disabled={!zipIsValid || checkingCoverage}
+                  loading={checkingCoverage}
+                  haptic="success"
+                  onPress={submitZip}
+                />
+              </Card>
+            </Animated.View>
+          )}
         </View>
       </SafeAreaView>
     </ThemedView>
+  );
+}
+
+function UnsupportedCoverageCard({
+  coverage,
+  onBrowseAnyway,
+  onTryAnotherZip,
+}: {
+  coverage: UnsupportedCoverage;
+  onBrowseAnyway: () => void;
+  onTryAnotherZip: () => void;
+}) {
+  const chainCount = coverage.chains.length;
+  const chainLabelText = `${chainCount} ${chainCount === 1 ? 'chain' : 'chains'}`;
+  const storeLabel = `${coverage.storeCount} ${coverage.storeCount === 1 ? 'store' : 'stores'}`;
+
+  return (
+    <Card style={styles.locationCard}>
+      <View style={styles.unsupportedCopy}>
+        <ThemedText type="title">{"Cartwise doesn't fully cover your area yet"}</ThemedText>
+        <ThemedText type="small" themeColor="textSecondary">
+          ZIP {coverage.zip} has {storeLabel} across {chainLabelText}. Comparisons may be incomplete.
+        </ThemedText>
+      </View>
+      <AppButton label="Try another ZIP" size="lg" onPress={onTryAnotherZip} />
+      <AppButton
+        label="Browse anyway"
+        variant="secondary"
+        size="lg"
+        haptic="success"
+        onPress={onBrowseAnyway}
+      />
+    </Card>
   );
 }
 
@@ -249,6 +336,9 @@ const styles = StyleSheet.create({
   },
   locationCard: {
     gap: Spacing.three,
+  },
+  unsupportedCopy: {
+    gap: Spacing.two,
   },
   locationButtonWrap: {
     position: 'relative',
