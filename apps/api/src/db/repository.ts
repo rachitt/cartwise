@@ -179,6 +179,7 @@ export interface CartwiseDb {
   setCacheEntry(key: string, payload: unknown, expiresAt: Date): Promise<void>;
   upsertStore(chain: ChainSlug, store: CollectedStore): Promise<StoreRow>;
   getStoresByIds(ids: string[]): Promise<StoreRow[]>;
+  listStoresByZip(zip: string): Promise<StoreRow[]>;
   getProductById(id: string): Promise<ProductRow | null>;
   findProductByUpc(upc: string): Promise<ProductRow | null>;
   findProductByIdentity(identity: FindProductIdentity): Promise<ProductRow | null>;
@@ -274,6 +275,13 @@ class DrizzleCartwiseDb implements CartwiseDb {
     }
 
     return (await drizzleDb.select().from(stores).where(inArray(stores.id, ids))) as StoreRow[];
+  }
+
+  async listStoresByZip(zip: string): Promise<StoreRow[]> {
+    return (await drizzleDb
+      .select()
+      .from(stores)
+      .where(sql`${stores.zip} like ${`${zip}%`}`)) as StoreRow[];
   }
 
   async getProductById(id: string): Promise<ProductRow | null> {

@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { createCache, type Cache, type CacheResult } from "../cache.js";
 import { upsertCollectedProduct } from "../catalog/matcher.js";
+import { recordCollectorOutcome } from "../collectors/health.js";
 import type { CollectedProduct, Collector } from "../collectors/types.js";
 import type { CartwiseDb, ProductRow } from "../db/repository.js";
 import { compareSearchableProducts, searchRelevanceScore } from "../search/relevance.js";
@@ -17,6 +18,7 @@ const PRODUCTS_TTL_SECONDS = 6 * 60 * 60;
 const storesQuerySchema = z.object({
   zip: z.string().regex(/^\d{5}$/),
 });
+const coverageQuerySchema = storesQuerySchema;
 
 const storeIdsSchema = z.string().transform((value, context) => {
   const storeIds = value
@@ -79,8 +81,29 @@ interface SearchCacheItem {
   relevanceScore: number;
 }
 
+interface CollectorHealthLogger {
+  error(payload: Record<string, unknown>, message?: string): void;
+  info?(payload: Record<string, unknown>, message?: string): void;
+}
+
 export const priceApiPlugin: FastifyPluginAsync<PriceApiDeps> = async (app, deps) => {
   const cache = deps.cache ?? createCache(deps.db);
+
+  app.get("/v1/coverage", async (request, reply) => {
+    const query = parseOr400(coverageQuerySchema, request.query, reply);
+    if (!query) {
+      return reply;
+    }
+
+    const stores = await deps.db.listStoresByZip(query.zip);
+    const chains = Array.from(new Set(stores.map((store) => store.chainSlug))).sort();
+
+    return {
+      supported: stores.length >= 2 && chains.length >= 2,
+      chains,
+      storeCount: stores.length,
+    };
+  });
 
   app.get("/stores", async (request, reply) => {
     const query = parseOr400(storesQuerySchema, request.query, reply);
@@ -105,6 +128,7 @@ export const priceApiPlugin: FastifyPluginAsync<PriceApiDeps> = async (app, deps
         `stores:${chain}:${query.zip}`,
         STORES_TTL_SECONDS,
         () => collector.findStores(query.zip),
+        app.log,
       );
       if (!result) {
         continue;
@@ -180,6 +204,7 @@ export const priceApiPlugin: FastifyPluginAsync<PriceApiDeps> = async (app, deps
 
           return matchedProducts;
         },
+        app.log,
       );
       if (!result) {
         continue;
@@ -282,6 +307,7 @@ export const priceApiPlugin: FastifyPluginAsync<PriceApiDeps> = async (app, deps
 
           return collectedProducts;
         },
+        app.log,
       );
       if (!result) {
         continue;
@@ -322,18 +348,22 @@ async function collectWithSource<T>(
   key: string,
   ttlSeconds: number,
   fn: () => Promise<T>,
+  logger?: CollectorHealthLogger,
 ): Promise<CacheResult<T> | null> {
   try {
     const result = cache.withCacheMeta
       ? await cache.withCacheMeta(key, ttlSeconds, fn)
       : { value: await cache.withCache(key, ttlSeconds, fn), fresh: true, capturedAt: new Date() };
+    const status = result.fresh ? "live" : "stale";
+    recordCollectorOutcome(chain, status, result.error, logger);
     sources.push({
       chain,
-      status: result.fresh ? "live" : "stale",
+      status,
       capturedAt: result.capturedAt.toISOString(),
     });
     return result;
-  } catch {
+  } catch (error) {
+    recordCollectorOutcome(chain, "error", error, logger);
     sources.push({ chain, status: "error" });
     return null;
   }

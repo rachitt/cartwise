@@ -312,6 +312,10 @@ class FakeCartDb implements CartwiseDb {
     return this.stores.filter((storeRow) => ids.includes(storeRow.id));
   }
 
+  async listStoresByZip(zip: string): Promise<StoreRow[]> {
+    return this.stores.filter((storeRow) => storeRow.zip.startsWith(zip));
+  }
+
   async getProductById(id: string): Promise<ProductRow | null> {
     return this.products.find((productRow) => productRow.id === id) ?? null;
   }

@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { createCache, type CacheDb } from "../cache.js";
 import type { CollectedProduct, Collector, CollectedStore } from "../collectors/types.js";
-import type { CacheEntry, CartwiseDb } from "../db/repository.js";
+import type { CacheEntry, CartwiseDb, StoreRow } from "../db/repository.js";
 import { priceApiPlugin } from "./price-api.js";
 
 describe("priceApiPlugin validation", () => {
@@ -53,6 +53,67 @@ describe("priceApiPlugin validation", () => {
     const response = await app.inject({ method: "GET", url: `/search?q=milk&storeIds=${storeIds}` });
 
     expect(response.statusCode).toBe(400);
+  });
+});
+
+describe("priceApiPlugin coverage", () => {
+  let app: ReturnType<typeof Fastify> | null = null;
+
+  afterEach(async () => {
+    await app?.close();
+    app = null;
+  });
+
+  it("returns 400 for an invalid coverage ZIP", async () => {
+    app = Fastify();
+    await app.register(priceApiPlugin, {
+      db: throwingDb(),
+      getCollector: () => null,
+    });
+
+    const response = await app.inject({ method: "GET", url: "/v1/coverage?zip=abcde" });
+
+    expect(response.statusCode).toBe(400);
+  });
+
+  it("supports ZIPs with at least two stores across two chains", async () => {
+    app = Fastify();
+    await app.register(priceApiPlugin, {
+      db: fakeCoverageDb([
+        storeRow("store-1", "kroger", "45202"),
+        storeRow("store-2", "target", "45202-1234"),
+      ]),
+      getCollector: () => null,
+    });
+
+    const response = await app.inject({ method: "GET", url: "/v1/coverage?zip=45202" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      supported: true,
+      chains: ["kroger", "target"],
+      storeCount: 2,
+    });
+  });
+
+  it("does not support ZIPs covered by only one chain", async () => {
+    app = Fastify();
+    await app.register(priceApiPlugin, {
+      db: fakeCoverageDb([
+        storeRow("store-1", "kroger", "45202"),
+        storeRow("store-2", "kroger", "45202"),
+      ]),
+      getCollector: () => null,
+    });
+
+    const response = await app.inject({ method: "GET", url: "/v1/coverage?zip=45202" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      supported: false,
+      chains: ["kroger"],
+      storeCount: 2,
+    });
   });
 });
 
@@ -366,6 +427,41 @@ function throwingDb(): CartwiseDb {
       },
     },
   ) as CartwiseDb;
+}
+
+function fakeCoverageDb(stores: StoreRow[]): CartwiseDb {
+  const target = {
+    async listStoresByZip(zip: string) {
+      return stores.filter((store) => store.zip.startsWith(zip));
+    },
+  };
+
+  const proxied = new Proxy(target, {
+    get(targetObject, property) {
+      if (property in targetObject) {
+        return targetObject[property as keyof typeof targetObject];
+      }
+
+      return async () => {
+        throw new Error(`Unexpected DB call: ${String(property)}`);
+      };
+    },
+  });
+
+  return proxied as unknown as CartwiseDb;
+}
+
+function storeRow(id: string, chainSlug: ChainSlug, zip: string): StoreRow {
+  return {
+    id,
+    chainSlug,
+    externalLocationId: `external-${id}`,
+    name: `${chainSlug} ${id}`,
+    address: `${id} Main St`,
+    zip,
+    lat: 39.1,
+    lng: -84.5,
+  };
 }
 
 function collectorFor(

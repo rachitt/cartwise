@@ -9,6 +9,7 @@ export interface CacheResult<T> {
   value: T;
   fresh: boolean;
   capturedAt: Date;
+  error?: unknown;
 }
 
 export interface Cache {
@@ -56,7 +57,9 @@ export function createCache(
       }
 
       const cached = readCachePayload<T>(entry, ttlSeconds);
-      return { value: cached.value, fresh: false, capturedAt: cached.storedAt };
+      const result: CacheResult<T> = { value: cached.value, fresh: false, capturedAt: cached.storedAt };
+      Object.defineProperty(result, "error", { value: error, enumerable: false });
+      return result;
     });
 
     inFlight.set(key, load as Promise<CacheResult<unknown>>);

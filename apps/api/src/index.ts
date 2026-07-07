@@ -2,6 +2,7 @@ import Fastify from "fastify";
 import rateLimit from "@fastify/rate-limit";
 import type { FastifyInstance, FastifyReply } from "fastify";
 
+import { getCollectorHealthReport } from "./collectors/health.js";
 import { getCollector, getCollectorStats } from "./collectors/registry.js";
 import { pool } from "./db/client.js";
 import { cartwiseDb } from "./db/repository.js";
@@ -86,6 +87,10 @@ export async function buildApp(options: BuildAppOptions = {}) {
     status: "ok",
     service: "cartwise-price-api",
     collectors: getCollectorStats(),
+  }));
+
+  app.get("/v1/health/collectors", async () => ({
+    collectors: getCollectorHealthReport(),
   }));
 
   await app.register(priceApiPlugin, { db: cartwiseDb, getCollector });
