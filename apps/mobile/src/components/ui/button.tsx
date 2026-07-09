@@ -71,12 +71,12 @@ export function AppButton({
       disabled={isDisabled}
       onPressIn={() => {
         if (!reducedMotion) {
-          scale.set(withSpring(0.97, Motion.spring));
+          scale.set(withSpring(0.97, Motion.springGentle));
         }
       }}
       onPressOut={() => {
         if (!reducedMotion) {
-          scale.set(withSpring(1, Motion.spring));
+          scale.set(withSpring(1, Motion.springGentle));
         }
       }}
       onPress={(event) => {
@@ -114,7 +114,7 @@ export function AppButton({
 const styles = StyleSheet.create({
   base: {
     minHeight: 44,
-    borderRadius: Radii.control,
+    borderRadius: Radii.chip,
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
@@ -122,9 +122,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
   },
   large: {
-    minHeight: 54,
-    borderRadius: Radii.control + 2,
-    paddingHorizontal: Spacing.four,
+    minHeight: 56,
+    borderRadius: Radii.chip,
+    paddingHorizontal: Spacing.five,
   },
   disabled: {
     opacity: 0.45,

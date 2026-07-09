@@ -1,5 +1,5 @@
 /**
- * Cartwise design tokens — "The Shelf Tag" system.
+ * Cartwise design tokens — v2 "The Yellow Tag" system.
  * Spec: workflows/design-system.md. Screens never use hex literals;
  * every color, radius, and duration comes from here.
  */
@@ -10,34 +10,48 @@ import { Platform } from 'react-native';
 
 export const Colors = {
   light: {
-    text: '#17231D',
-    textSecondary: '#647369',
-    background: '#FFFDF8',
+    text: '#241934',
+    textSecondary: '#6B6176',
+    background: '#FAF7F1',
     backgroundElement: '#FFFFFF',
-    backgroundSelected: '#F1F5EF',
-    accent: '#0F6B45',
-    accentMuted: '#EAF7EE',
+    backgroundSelected: '#F2EDF7',
+    accent: '#53307E',
+    accentMuted: '#F0E9F8',
     onAccent: '#FFFFFF',
-    deal: '#B95714',
-    dealMuted: '#FFF0DE',
-    border: '#DDE7DC',
-    danger: '#B3261E',
-    dangerMuted: '#F9E2E0',
+    deal: '#8F5B00',
+    dealMuted: '#FFF3D6',
+    dealTag: '#FFC53D',
+    onDealTag: '#241934',
+    border: '#E5DEEC',
+    danger: '#BA3B2E',
+    dangerMuted: '#F9E3DF',
+    heroSurface: '#43276A',
+    heroSurfaceDeep: '#331C55',
+    onHero: '#FFFFFF',
+    onHeroMuted: '#C9B8E4',
+    shadow: '#2E1D45',
   },
   dark: {
-    text: '#EFF7EF',
-    textSecondary: '#A9B8AD',
-    background: '#101611',
-    backgroundElement: '#1B241D',
-    backgroundSelected: '#253127',
-    accent: '#78DFA5',
-    accentMuted: '#173D29',
-    onAccent: '#0B2417',
-    deal: '#F2A35C',
-    dealMuted: '#3F2A17',
-    border: '#344237',
-    danger: '#F2B8B5',
-    dangerMuted: '#42201E',
+    text: '#F3EFFA',
+    textSecondary: '#A79FB8',
+    background: '#131019',
+    backgroundElement: '#1D1729',
+    backgroundSelected: '#2A2138',
+    accent: '#C7A9F1',
+    accentMuted: '#33254D',
+    onAccent: '#221636',
+    deal: '#FFCE57',
+    dealMuted: '#3D2F14',
+    dealTag: '#FFC53D',
+    onDealTag: '#241934',
+    border: '#362C4A',
+    danger: '#F2A69E',
+    dangerMuted: '#45211D',
+    heroSurface: '#34215C',
+    heroSurfaceDeep: '#271745',
+    onHero: '#FFFFFF',
+    onHeroMuted: '#B9A6DC',
+    shadow: '#000000',
   },
 } as const;
 
@@ -91,23 +105,48 @@ export const Spacing = {
 
 export const Radii = {
   /** Cards, panels, list groups */
-  card: 16,
+  card: 20,
   /** Buttons, inputs, steppers */
-  control: 12,
+  control: 14,
   /** Product thumbnails */
-  thumb: 10,
+  thumb: 12,
   /** Pills and chips */
   chip: 999,
+  /** Hero cards, sheets, and floating bars */
+  hero: 28,
 } as const;
+
+const springGentle = { damping: 20, stiffness: 200 } as const;
 
 export const Motion = {
   /** Micro feedback: press scale, chip fades */
   fast: 140,
   /** Standard transitions: row expand, section reveals */
-  base: 220,
-  /** Shared spring for expand/settle moments */
-  spring: { damping: 18, stiffness: 220 },
+  base: 240,
+  /** Count-ups and hero entrances */
+  slow: 450,
+  /** Settles and layout changes */
+  springGentle,
+  /** Badges, tags, and active tab icons */
+  springPop: { damping: 13, stiffness: 300 },
+  /** Compatibility alias for the gentle spring. */
+  spring: springGentle,
 } as const;
 
-export const BottomTabInset = Platform.select({ ios: 50, android: 80 }) ?? 0;
+export const Elevation = {
+  card: {
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 3,
+  },
+  float: {
+    shadowOpacity: 0.18,
+    shadowRadius: 28,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 10,
+  },
+} as const;
+
+export const BottomTabInset = Platform.select({ ios: 104, android: 96 }) ?? 96;
 export const MaxContentWidth = 800;

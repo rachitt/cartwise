@@ -3,16 +3,24 @@ import {
   TabList,
   TabTrigger,
   TabSlot,
-  TabTriggerSlotProps,
-  TabListProps,
+  type TabTriggerSlotProps,
+  type TabListProps,
 } from 'expo-router/ui';
-import { Pressable, View, StyleSheet } from 'react-native';
-
-import { ThemedText } from './themed-text';
-import { ThemedView } from './themed-view';
+import { SymbolView, type SymbolViewProps } from 'expo-symbols';
+import { Pressable, StyleSheet, View, type ViewStyle } from 'react-native';
 
 import { useCurrentCart } from '@/api/queries';
-import { FontFamilies, MaxContentWidth, Spacing } from '@/constants/theme';
+import { ThemedText } from '@/components/themed-text';
+import { Elevation, Radii } from '@/constants/theme';
+import { useTheme } from '@/hooks/use-theme';
+import { tapLight } from '@/lib/haptics';
+
+const icons = {
+  search: { ios: 'magnifyingglass', android: 'search', web: 'search' },
+  cart: { ios: 'cart', android: 'shopping_cart', web: 'shopping_cart' },
+  alerts: { ios: 'bell', android: 'notifications', web: 'notifications' },
+  settings: { ios: 'gearshape', android: 'settings', web: 'settings' },
+} satisfies Record<string, SymbolViewProps['name']>;
 
 export default function AppTabs() {
   const cartQuery = useCurrentCart();
@@ -25,16 +33,18 @@ export default function AppTabs() {
       <TabList asChild>
         <CustomTabList>
           <TabTrigger name="home" href="/" asChild>
-            <TabButton>Search</TabButton>
+            <TabButton icon={icons.search}>Search</TabButton>
           </TabTrigger>
           <TabTrigger name="cart" href="/cart" asChild>
-            <TabButton badge={cartItemCount}>Cart</TabButton>
+            <TabButton icon={icons.cart} badge={cartItemCount}>
+              Cart
+            </TabButton>
           </TabTrigger>
           <TabTrigger name="alerts" href="/alerts" asChild>
-            <TabButton>Alerts</TabButton>
+            <TabButton icon={icons.alerts}>Alerts</TabButton>
           </TabTrigger>
           <TabTrigger name="settings" href="/settings" asChild>
-            <TabButton>Settings</TabButton>
+            <TabButton icon={icons.settings}>Settings</TabButton>
           </TabTrigger>
         </CustomTabList>
       </TabList>
@@ -46,38 +56,61 @@ export function TabButton({
   children,
   isFocused,
   badge = 0,
+  icon,
+  onPress,
   ...props
-}: TabTriggerSlotProps & { badge?: number }) {
+}: TabTriggerSlotProps & { badge?: number; icon: SymbolViewProps['name'] }) {
+  const theme = useTheme();
+  const tint = isFocused ? theme.accent : theme.textSecondary;
+  const label = typeof children === 'string' ? children : undefined;
+
   return (
-    <Pressable {...props} style={({ pressed }) => pressed && styles.pressed}>
-      <ThemedView
-        type={isFocused ? 'accentMuted' : 'backgroundElement'}
-        style={styles.tabButtonView}>
-        <ThemedText type="small" themeColor={isFocused ? 'accent' : 'textSecondary'}>
-          {children}
-        </ThemedText>
+    <Pressable
+      {...props}
+      accessibilityRole="tab"
+      accessibilityLabel={label}
+      accessibilityState={{ selected: Boolean(isFocused) }}
+      onPress={(event) => {
+        tapLight();
+        onPress?.(event);
+      }}
+      style={({ pressed }) => [styles.tabButton, pressed && styles.pressed]}>
+      <View style={styles.iconSlot}>
+        <SymbolView name={icon} tintColor={tint} size={24} />
         {badge > 0 ? (
-          <ThemedView type="accent" style={styles.badge}>
-            <ThemedText type="smallBold" themeColor="onAccent" style={styles.badgeText}>
+          <View style={[styles.badge, { backgroundColor: theme.accent }]}>
+            <ThemedText type="caption" themeColor="onAccent" style={styles.badgeText}>
               {badge}
             </ThemedText>
-          </ThemedView>
+          </View>
         ) : null}
-      </ThemedView>
+      </View>
+      <ThemedText
+        type="caption"
+        themeColor={isFocused ? 'accent' : 'textSecondary'}
+        style={styles.label}>
+        {children}
+      </ThemedText>
     </Pressable>
   );
 }
 
-export function CustomTabList(props: TabListProps) {
-  return (
-    <View {...props} style={styles.tabListContainer}>
-      <ThemedView type="backgroundElement" style={styles.innerContainer}>
-        <ThemedText type="smallBold" style={styles.brandText}>
-          Cartwise
-        </ThemedText>
+export function CustomTabList({ children, style, ...props }: TabListProps) {
+  const theme = useTheme();
 
-        {props.children}
-      </ThemedView>
+  return (
+    <View {...props} style={[styles.tabListContainer, style]}>
+      <View
+        style={[
+          styles.innerContainer,
+          {
+            backgroundColor: theme.backgroundElement,
+            borderColor: theme.border,
+            shadowColor: theme.shadow,
+          },
+        ]}>
+        {children}
+      </View>
     </View>
   );
 }
@@ -85,52 +118,58 @@ export function CustomTabList(props: TabListProps) {
 const styles = StyleSheet.create({
   tabSlot: {
     height: '100%',
-    paddingTop: 88,
   },
   tabListContainer: {
-    position: 'absolute',
-    top: 0,
-    zIndex: 10,
-    width: '100%',
-    padding: Spacing.three,
-    justifyContent: 'center',
+    position: 'fixed' as ViewStyle['position'],
+    left: 0,
+    right: 0,
+    bottom: 20,
+    zIndex: 20,
+    paddingHorizontal: 20,
     alignItems: 'center',
-    flexDirection: 'row',
   },
   innerContainer: {
-    paddingVertical: Spacing.two,
-    paddingHorizontal: Spacing.three,
-    borderRadius: Spacing.three,
+    width: '100%',
+    maxWidth: 480,
+    height: 64,
+    borderRadius: Radii.chip,
+    borderWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',
-    alignItems: 'center',
-    flexGrow: 1,
-    gap: Spacing.two,
-    maxWidth: MaxContentWidth,
+    overflow: 'hidden',
+    ...Elevation.float,
   },
-  brandText: {
-    fontFamily: FontFamilies.displayBold,
-    marginRight: 'auto',
+  tabButton: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
   },
   pressed: {
     opacity: 0.7,
   },
-  tabButtonView: {
-    paddingVertical: Spacing.one,
-    paddingHorizontal: Spacing.three,
-    borderRadius: Spacing.three,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.one,
-  },
-  badge: {
-    minWidth: 20,
-    height: 20,
-    borderRadius: 10,
+  iconSlot: {
+    width: 30,
+    height: 26,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: Spacing.one,
+  },
+  label: {
+    fontWeight: 700,
+  },
+  badge: {
+    position: 'absolute',
+    top: -4,
+    right: -8,
+    minWidth: 18,
+    height: 18,
+    borderRadius: Radii.chip,
+    paddingHorizontal: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   badgeText: {
-    lineHeight: 18,
+    fontWeight: 700,
+    fontSize: 10,
+    lineHeight: 12,
   },
 });

@@ -77,7 +77,7 @@ const sizes: Record<PriceTextSize, { mainSize: number; superSize: number; displa
   sm: { mainSize: 15, superSize: 11 },
   md: { mainSize: 18, superSize: 12 },
   lg: { mainSize: 24, superSize: 14 },
-  hero: { mainSize: 44, superSize: 22, display: true },
+  hero: { mainSize: 48, superSize: 24, display: true },
 };
 
 const styles = StyleSheet.create({

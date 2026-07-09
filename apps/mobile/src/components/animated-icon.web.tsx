@@ -1,108 +1,68 @@
-import { Image } from 'expo-image';
+import * as Font from 'expo-font';
 import { StyleSheet, View } from 'react-native';
-import Animated, { Keyframe, Easing } from 'react-native-reanimated';
+import Animated, { Easing, FadeIn, Keyframe, useReducedMotion } from 'react-native-reanimated';
 
-import classes from './animated-icon.module.css';
-const DURATION = 300;
+import { Colors, FontFamilies, Motion, Radii, Spacing } from '@/constants/theme';
+
+const iconKeyframe = new Keyframe({
+  0: {
+    transform: [{ scale: 0.94 }],
+    opacity: 0,
+  },
+  100: {
+    transform: [{ scale: 1 }],
+    opacity: 1,
+    easing: Easing.out(Easing.cubic),
+  },
+});
 
 export function AnimatedSplashOverlay() {
   return null;
 }
 
-const keyframe = new Keyframe({
-  0: {
-    transform: [{ scale: 0 }],
-  },
-  60: {
-    transform: [{ scale: 1.2 }],
-    easing: Easing.elastic(1.2),
-  },
-  100: {
-    transform: [{ scale: 1 }],
-    easing: Easing.elastic(1.2),
-  },
-});
-
-const logoKeyframe = new Keyframe({
-  0: {
-    opacity: 0,
-  },
-  60: {
-    transform: [{ scale: 1.2 }],
-    opacity: 0,
-    easing: Easing.elastic(1.2),
-  },
-  100: {
-    transform: [{ scale: 1 }],
-    opacity: 1,
-    easing: Easing.elastic(1.2),
-  },
-});
-
-const glowKeyframe = new Keyframe({
-  0: {
-    transform: [{ rotateZ: '-180deg' }, { scale: 0.8 }],
-    opacity: 0,
-  },
-  [DURATION / 1000]: {
-    transform: [{ rotateZ: '0deg' }, { scale: 1 }],
-    opacity: 1,
-    easing: Easing.elastic(0.7),
-  },
-  100: {
-    transform: [{ rotateZ: '7200deg' }],
-  },
-});
-
 export function AnimatedIcon() {
+  const reducedMotion = useReducedMotion();
+  const displayFontFamily = Font.isLoaded(FontFamilies.displayBold)
+    ? FontFamilies.displayBold
+    : undefined;
+
   return (
     <View style={styles.iconContainer}>
-      <Animated.View entering={glowKeyframe.duration(60 * 1000 * 4)} style={styles.glow}>
-        <Image style={styles.glow} source={require('@/assets/images/logo-glow.png')} />
-      </Animated.View>
-
-      <Animated.View style={styles.background} entering={keyframe.duration(DURATION)}>
-        <div className={classes.expoLogoBackground} />
-      </Animated.View>
-
-      <Animated.View style={styles.imageContainer} entering={logoKeyframe.duration(DURATION)}>
-        <Image style={styles.image} source={require('@/assets/images/expo-logo.png')} />
+      <Animated.View
+        entering={
+          reducedMotion ? FadeIn.duration(Motion.fast) : iconKeyframe.duration(Motion.base)
+        }
+        style={styles.iconBackground}>
+        <Animated.Text
+          style={[styles.mark, displayFontFamily ? { fontFamily: displayFontFamily } : null]}>
+          Cartwise
+        </Animated.Text>
       </Animated.View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    alignItems: 'center',
-    width: '100%',
-    zIndex: 1000,
-    position: 'absolute',
-    top: 128 / 2 + 138,
-  },
-  imageContainer: {
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  glow: {
-    width: 201,
-    height: 201,
-    position: 'absolute',
-  },
   iconContainer: {
     justifyContent: 'center',
     alignItems: 'center',
-    width: 128,
-    height: 128,
+    width: 192,
+    height: 96,
   },
-  image: {
-    position: 'absolute',
-    width: 76,
-    height: 71,
+  iconBackground: {
+    width: 192,
+    height: 96,
+    borderRadius: Radii.card,
+    backgroundColor: Colors.light.background,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  background: {
-    width: 128,
-    height: 128,
-    position: 'absolute',
+  mark: {
+    color: Colors.light.accent,
+    fontSize: 34,
+    lineHeight: 40,
+    fontWeight: '700',
+    paddingHorizontal: Spacing.two,
+    textAlign: 'center',
   },
 });

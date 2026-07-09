@@ -42,6 +42,12 @@ const CHEVRON_ICON = {
   web: 'chevron_right',
 } satisfies SymbolViewProps['name'];
 
+const BACK_ICON = {
+  ios: 'chevron.left',
+  android: 'chevron_left',
+  web: 'chevron_left',
+} satisfies SymbolViewProps['name'];
+
 export default function CartResultsScreen() {
   const queryClient = useQueryClient();
   const optimization = queryClient.getQueryData<CartOptimization>(cartOptimizationQueryKey);
@@ -403,7 +409,7 @@ function TopBar({ label, onBack }: { label: string; onBack: () => void }) {
         styles.backControl,
         pressed && { backgroundColor: theme.backgroundSelected },
       ]}>
-      <SymbolView name="chevron.left" tintColor={theme.accent} size={16} />
+      <SymbolView name={BACK_ICON} tintColor={theme.accent} size={16} />
       <ThemedText type="smallBold" themeColor="accent">
         {label}
       </ThemedText>
