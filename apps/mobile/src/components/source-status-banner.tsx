@@ -1,5 +1,4 @@
 import type { ChainSlug, Store } from '@cartwise/shared';
-import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { StyleSheet, View, type ViewProps } from 'react-native';
 
 import type { ResponseSource, SourceStatus } from '@/api/client';
@@ -7,12 +6,6 @@ import { ThemedText } from '@/components/themed-text';
 import { Radii, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { chainLabel } from '@/lib/price';
-
-const WARNING_ICON = {
-  ios: 'exclamationmark.triangle',
-  android: 'warning',
-  web: 'warning',
-} satisfies SymbolViewProps['name'];
 
 type SourceStatusBannerProps = ViewProps & {
   sources?: ResponseSource[] | null;
@@ -48,12 +41,22 @@ export function SourceStatusBanner({
       accessibilityRole="alert"
       style={[
         styles.banner,
-        { backgroundColor: theme.dangerMuted, borderColor: theme.danger },
+        { backgroundColor: theme.backgroundSelected },
         style,
       ]}
       {...rest}>
-      <SymbolView name={WARNING_ICON} tintColor={theme.danger} size={18} />
-      <ThemedText type="small" themeColor="danger" style={styles.message}>
+      <View style={styles.statusDots} accessibilityElementsHidden>
+        {statuses.map((source) => (
+          <View
+            key={source.chain}
+            style={[
+              styles.statusDot,
+              { backgroundColor: theme[source.status === 'error' ? 'danger' : 'deal'] },
+            ]}
+          />
+        ))}
+      </View>
+      <ThemedText type="caption" themeColor="textSecondary" style={styles.message}>
         {message}
       </ThemedText>
     </View>
@@ -97,14 +100,22 @@ function formatChainList(chains: string[]) {
 
 const styles = StyleSheet.create({
   banner: {
-    minHeight: 48,
-    borderWidth: 1,
+    minHeight: 40,
     borderRadius: Radii.control,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two,
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two,
+  },
+  statusDots: {
+    flexDirection: 'row',
+    gap: Spacing.one,
+  },
+  statusDot: {
+    width: 7,
+    height: 7,
+    borderRadius: Radii.chip,
   },
   message: {
     flex: 1,

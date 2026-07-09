@@ -1,8 +1,16 @@
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
+import { useEffect, useRef } from 'react';
 import { Pressable, StyleSheet, View, type GestureResponderEvent } from 'react-native';
+import Animated, {
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withSequence,
+  withSpring,
+} from 'react-native-reanimated';
 
 import { ThemedText } from '@/components/themed-text';
-import { Radii, Spacing } from '@/constants/theme';
+import { Motion, Radii, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { tapLight } from '@/lib/haptics';
 
@@ -30,6 +38,25 @@ export function CartQuantityStepper({
   disabled = false,
 }: CartQuantityStepperProps) {
   const theme = useTheme();
+  const reducedMotion = useReducedMotion();
+  const previousQty = useRef(qty);
+  const qtyScale = useSharedValue(1);
+
+  useEffect(() => {
+    if (previousQty.current !== qty && !reducedMotion) {
+      qtyScale.set(
+        withSequence(
+          withSpring(1.25, Motion.springPop),
+          withSpring(1, Motion.springPop),
+        ),
+      );
+    }
+    previousQty.current = qty;
+  }, [qty, qtyScale, reducedMotion]);
+
+  const animatedQtyStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: qtyScale.get() }],
+  }));
 
   const handleChange = (nextQty: number, event: GestureResponderEvent) => {
     event.stopPropagation();
@@ -48,7 +75,7 @@ export function CartQuantityStepper({
       accessibilityValue={{ now: qty }}
       style={[
         styles.container,
-        { backgroundColor: theme.background, borderColor: theme.border },
+        { backgroundColor: theme.backgroundSelected },
         disabled && styles.disabled,
       ]}>
       <Pressable
@@ -60,9 +87,11 @@ export function CartQuantityStepper({
         style={({ pressed }) => [styles.button, pressed && styles.pressed]}>
         <SymbolView name={MINUS_ICON} tintColor={theme.text} size={14} />
       </Pressable>
-      <ThemedText type="smallBold" style={styles.qty}>
-        {qty}
-      </ThemedText>
+      <Animated.View style={animatedQtyStyle}>
+        <ThemedText type="smallBold" style={styles.qty}>
+          {qty}
+        </ThemedText>
+      </Animated.View>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="Increase quantity"
@@ -78,23 +107,24 @@ export function CartQuantityStepper({
 
 const styles = StyleSheet.create({
   container: {
-    minHeight: 44,
-    borderRadius: Radii.control,
-    borderWidth: 1,
+    minHeight: 36,
+    borderRadius: Radii.chip,
     flexDirection: 'row',
     alignItems: 'center',
     alignSelf: 'flex-start',
   },
   button: {
-    width: 44,
-    minHeight: 42,
+    width: 36,
+    height: 36,
+    borderRadius: Radii.chip,
     alignItems: 'center',
     justifyContent: 'center',
   },
   qty: {
-    minWidth: 34,
+    minWidth: 30,
     textAlign: 'center',
     paddingHorizontal: Spacing.one,
+    fontVariant: ['tabular-nums'],
   },
   pressed: {
     opacity: 0.72,
