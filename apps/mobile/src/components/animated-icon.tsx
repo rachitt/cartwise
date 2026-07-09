@@ -2,7 +2,7 @@ import * as Font from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
-import Animated, { Easing, Keyframe, useReducedMotion } from 'react-native-reanimated';
+import Animated, { Easing, FadeIn, Keyframe, useReducedMotion } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 
 import { Colors, FontFamilies, Motion, Radii, Spacing } from '@/constants/theme';
@@ -65,13 +65,16 @@ const markKeyframe = new Keyframe({
 });
 
 export function AnimatedIcon() {
+  const reducedMotion = useReducedMotion();
+  const backgroundEntrance = reducedMotion
+    ? FadeIn.duration(Motion.fast)
+    : iconBackgroundKeyframe.duration(DURATION);
+  const markEntrance = reducedMotion ? FadeIn.duration(Motion.fast) : markKeyframe.duration(DURATION);
+
   return (
     <View style={styles.iconContainer}>
-      <Animated.View
-        entering={iconBackgroundKeyframe.duration(DURATION)}
-        style={styles.iconBackground}
-      />
-      <Animated.View entering={markKeyframe.duration(DURATION)} style={styles.imageContainer}>
+      <Animated.View entering={backgroundEntrance} style={styles.iconBackground} />
+      <Animated.View entering={markEntrance} style={styles.imageContainer}>
         <CartwiseMark compact />
       </Animated.View>
     </View>
@@ -122,14 +125,14 @@ const styles = StyleSheet.create({
     zIndex: 100,
   },
   iconBackground: {
-    backgroundColor: Colors.light.accent,
+    backgroundColor: Colors.light.background,
     borderRadius: Radii.card,
     width: 192,
     height: 96,
     position: 'absolute',
   },
   mark: {
-    color: Colors.light.onAccent,
+    color: Colors.light.accent,
     fontSize: 40,
     lineHeight: 46,
     fontWeight: '700',
@@ -142,7 +145,7 @@ const styles = StyleSheet.create({
   },
   splashOverlay: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: Colors.light.accent,
+    backgroundColor: Colors.light.background,
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 1000,

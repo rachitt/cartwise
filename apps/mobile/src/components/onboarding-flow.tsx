@@ -1,7 +1,13 @@
 import * as Location from 'expo-location';
 import { useState } from 'react';
 import { ActivityIndicator, Keyboard, StyleSheet, TextInput, View } from 'react-native';
-import Animated, { FadeIn, FadeInDown, useReducedMotion } from 'react-native-reanimated';
+import Animated, {
+  interpolateColor,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { getCoverage, type CoverageResponse } from '@/api/client';
@@ -11,11 +17,12 @@ import { AppButton } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { MaxContentWidth, Motion, Radii, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { entrance } from '@/lib/motion';
 import { usePreferencesStore } from '@/state/preferences';
 
-const entranceDelay = [0, 70, 140, 220] as const;
-
 type UnsupportedCoverage = CoverageResponse & { zip: string };
+
+const AnimatedTextInput = Animated.createAnimatedComponent(TextInput);
 
 export function OnboardingFlow() {
   const persistedZip = usePreferencesStore((state) => state.zip);
@@ -28,7 +35,25 @@ export function OnboardingFlow() {
   const [resolvingLocation, setResolvingLocation] = useState(false);
   const theme = useTheme();
   const reducedMotion = useReducedMotion();
+  const focusProgress = useSharedValue(0);
   const zipIsValid = /^\d{5}$/.test(zipInput);
+  const inputBaseColor = zipIsValid || zipInput.length === 0 ? theme.border : theme.danger;
+  const animatedInputStyle = useAnimatedStyle(
+    () => ({
+      borderColor: interpolateColor(
+        focusProgress.get(),
+        [0, 1],
+        [inputBaseColor, theme.accent],
+      ),
+    }),
+    [inputBaseColor, theme.accent],
+  );
+
+  function setInputFocus(nextValue: number) {
+    focusProgress.set(
+      reducedMotion ? nextValue : withTiming(nextValue, { duration: Motion.fast }),
+    );
+  }
 
   async function useCurrentLocation() {
     setLocationError(null);
@@ -115,25 +140,26 @@ export function OnboardingFlow() {
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.container}>
           <View style={styles.header}>
-            <Animated.View entering={getEntrance(reducedMotion, 0)}>
-              <ThemedText type="display" themeColor="accent">
+            <Animated.View entering={entrance(0, reducedMotion)}>
+              <ThemedText type="title" themeColor="accent">
                 Cartwise
               </ThemedText>
             </Animated.View>
-            <Animated.View entering={getEntrance(reducedMotion, 1)}>
-              <ThemedText type="title">
-                The same groceries cost different prices on the same street.
+            <Animated.View entering={entrance(1, reducedMotion)}>
+              <ThemedText type="displayXL">
+                The same cart. Four different totals.
               </ThemedText>
             </Animated.View>
-            <Animated.View entering={getEntrance(reducedMotion, 2)}>
+            <Animated.View entering={entrance(2, reducedMotion)}>
               <ThemedText type="small" themeColor="textSecondary">
-                Cartwise checks Kroger, Walmart, Target, and ALDI near you.
+                Cartwise checks Kroger, Walmart, Target, and ALDI near you — and finds where your
+                whole cart is cheapest.
               </ThemedText>
             </Animated.View>
           </View>
 
           {unsupportedCoverage ? (
-            <Animated.View entering={getEntrance(reducedMotion, 3)}>
+            <Animated.View entering={entrance(4, reducedMotion)}>
               <UnsupportedCoverageCard
                 coverage={unsupportedCoverage}
                 onBrowseAnyway={() => continueWithZip(unsupportedCoverage.zip, true)}
@@ -144,7 +170,7 @@ export function OnboardingFlow() {
               />
             </Animated.View>
           ) : (
-            <Animated.View entering={getEntrance(reducedMotion, 3)}>
+            <Animated.View entering={entrance(4, reducedMotion)}>
               <Card style={styles.locationCard}>
                 <LocationButton
                   busy={resolvingLocation}
@@ -160,12 +186,14 @@ export function OnboardingFlow() {
                   <View style={[styles.divider, { backgroundColor: theme.border }]} />
                 </View>
 
-                <TextInput
+                <AnimatedTextInput
                   accessibilityLabel="ZIP code"
                   autoComplete="postal-code"
                   inputMode="numeric"
                   keyboardType="number-pad"
                   maxLength={5}
+                  onBlur={() => setInputFocus(0)}
+                  onFocus={() => setInputFocus(1)}
                   onSubmitEditing={submitZip}
                   placeholder="45202"
                   placeholderTextColor={theme.textSecondary}
@@ -180,9 +208,9 @@ export function OnboardingFlow() {
                     styles.input,
                     {
                       color: theme.text,
-                      borderColor: zipIsValid || zipInput.length === 0 ? theme.border : theme.danger,
                       backgroundColor: theme.backgroundElement,
                     },
+                    animatedInputStyle,
                   ]}
                 />
                 {zipInput.length > 0 && !zipIsValid ? (
@@ -289,12 +317,6 @@ function LocationButton({
   );
 }
 
-function getEntrance(reducedMotion: boolean, index: number) {
-  const animation = reducedMotion ? FadeIn : FadeInDown;
-
-  return animation.duration(Motion.base).delay(entranceDelay[index] ?? 0);
-}
-
 function getPostalCode(addresses: Location.LocationGeocodedAddress[]) {
   for (const address of addresses) {
     const match = address.postalCode?.match(/\d{5}/);
@@ -345,7 +367,7 @@ const styles = StyleSheet.create({
   },
   locationBusyOverlay: {
     ...StyleSheet.absoluteFill,
-    borderRadius: Radii.control + 2,
+    borderRadius: Radii.chip,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: Spacing.four,
@@ -358,7 +380,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   input: {
-    minHeight: 54,
+    minHeight: 56,
     borderWidth: 1,
     borderRadius: Radii.control,
     paddingHorizontal: Spacing.three,

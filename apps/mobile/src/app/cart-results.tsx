@@ -2,25 +2,37 @@ import type { CartBillLine, CartOptimization, Store, StoreCartTotal } from '@car
 import { useQueryClient } from '@tanstack/react-query';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { router } from 'expo-router';
-import { useMemo, useState, type ReactNode } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Animated, {
+  FadeIn,
+  FadeInUp,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withSpring,
+} from 'react-native-reanimated';
 
 import type { CartItem } from '@/api/client';
 import { cartOptimizationQueryKey, useCurrentCart, useNearbyStores } from '@/api/queries';
 import { SourceStatusBanner } from '@/components/source-status-banner';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { AnimatedPriceText } from '@/components/ui/animated-price-text';
 import { Card } from '@/components/ui/card';
 import { Chip } from '@/components/ui/chip';
 import { EmptyState } from '@/components/ui/empty-state';
 import { FreshnessStamp } from '@/components/ui/freshness-stamp';
+import { PressableScale } from '@/components/ui/pressable-scale';
 import { PriceText } from '@/components/ui/price-text';
 import { ProductThumb } from '@/components/ui/product-thumb';
+import { SavingsTag } from '@/components/ui/savings-tag';
 import { Skeleton } from '@/components/ui/skeleton';
-import { MaxContentWidth, Radii, Spacing } from '@/constants/theme';
+import { MaxContentWidth, Motion, Radii, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { tapLight } from '@/lib/haptics';
+import { tapSuccess } from '@/lib/haptics';
+import { entrance } from '@/lib/motion';
 import { chainLabel, formatPrice, formatProductSize } from '@/lib/price';
 import { usePreferencesStore } from '@/state/preferences';
 
@@ -36,10 +48,10 @@ const WARNING_ICON = {
   web: 'warning',
 } satisfies SymbolViewProps['name'];
 
-const CHEVRON_ICON = {
-  ios: 'chevron.right',
-  android: 'chevron_right',
-  web: 'chevron_right',
+const BACK_ICON = {
+  ios: 'chevron.left',
+  android: 'chevron_left',
+  web: 'chevron_left',
 } satisfies SymbolViewProps['name'];
 
 export default function CartResultsScreen() {
@@ -49,12 +61,11 @@ export default function CartResultsScreen() {
   const cartQuery = useCurrentCart();
   const storesQuery = useNearbyStores(zip);
   const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null);
+  const [hasShownRankedView, setHasShownRankedView] = useState(false);
+  const [hasRevealedSavings, setHasRevealedSavings] = useState(false);
 
   const stores = useMemo(() => storesQuery.data?.stores ?? [], [storesQuery.data?.stores]);
-  const cartItems = useMemo(
-    () => cartQuery.data?.cart.items ?? [],
-    [cartQuery.data?.cart.items],
-  );
+  const cartItems = useMemo(() => cartQuery.data?.cart.items ?? [], [cartQuery.data?.cart.items]);
   const storeById = useMemo(() => new Map(stores.map((store) => [store.id, store])), [stores]);
   const productById = useMemo(
     () => new Map(cartItems.map((item) => [item.productId, item.product])),
@@ -68,6 +79,9 @@ export default function CartResultsScreen() {
     selectedStoreId === null
       ? null
       : rankedStoreTotals.find((storeTotal) => storeTotal.storeId === selectedStoreId) ?? null;
+
+  const markRankedViewShown = useCallback(() => setHasShownRankedView(true), []);
+  const markSavingsRevealed = useCallback(() => setHasRevealedSavings(true), []);
 
   if (!optimization) {
     return (
@@ -108,48 +122,255 @@ export default function CartResultsScreen() {
     );
   }
 
+  const winner = rankedStoreTotals[0];
+  const priciest = rankedStoreTotals[rankedStoreTotals.length - 1];
+  const animateRankedView = !hasShownRankedView;
+
   return (
     <ScreenShell>
       <TopBar label="Cart" onBack={() => router.back()} />
-
-      <View style={styles.header}>
-        <ThemedText type="eyebrow" themeColor="accent">
-          CARTWISE
-        </ThemedText>
-        <ThemedText type="display">Store totals</ThemedText>
-        <ThemedText type="small" themeColor="textSecondary">
-          {rankedStoreTotals.length} ranked {rankedStoreTotals.length === 1 ? 'store' : 'stores'} near{' '}
-          {zip}
-        </ThemedText>
-      </View>
-
-      <SourceStatusBanner sources={storesQuery.data?.sources} stores={stores} />
+      <ThemedText type="eyebrow" themeColor="accent">
+        YOUR CHEAPEST STORE
+      </ThemedText>
 
       {cartQuery.isLoading || storesQuery.isLoading ? (
         <ResultsSkeleton />
+      ) : winner ? (
+        <>
+          <HeroBillCard
+            animateEntrance={animateRankedView}
+            revealPlayed={hasRevealedSavings}
+            onEntranceShown={markRankedViewShown}
+            onReveal={markSavingsRevealed}
+            priciestStoreName={
+              storeById.get(priciest.storeId)?.name ?? priciest.storeId
+            }
+            savings={Math.max(0, optimization.worstTotal - winner.total)}
+            store={storeById.get(winner.storeId)}
+            storeTotal={winner}
+            onPress={() => setSelectedStoreId(winner.storeId)}
+          />
+
+          <SourceStatusBanner sources={storesQuery.data?.sources} stores={stores} />
+
+          {rankedStoreTotals.length > 1 ? (
+            <OtherStoresSection
+              animateEntrance={animateRankedView}
+              storeById={storeById}
+              stores={rankedStoreTotals.slice(1)}
+              winner={winner}
+              onSelectStore={setSelectedStoreId}
+            />
+          ) : null}
+        </>
       ) : (
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <ThemedText type="eyebrow">RANKED STORES</ThemedText>
-            <ThemedText type="caption" themeColor="textSecondary">
-              Sorted by total bill
-            </ThemedText>
-          </View>
-          <View style={styles.storeCardStack}>
-            {rankedStoreTotals.map((storeTotal, index) => (
-              <StoreTotalCard
-                key={storeTotal.storeId}
-                isCheapest={index === 0}
-                store={storeById.get(storeTotal.storeId)}
-                storeTotal={storeTotal}
-                worstTotal={optimization.worstTotal}
-                onPress={() => setSelectedStoreId(storeTotal.storeId)}
-              />
-            ))}
-          </View>
-        </View>
+        <EmptyState
+          icon={RESULTS_EMPTY_ICON}
+          title="No ranked stores"
+          message="No store totals were returned for this cart."
+        />
       )}
     </ScreenShell>
+  );
+}
+
+function HeroBillCard({
+  animateEntrance,
+  priciestStoreName,
+  revealPlayed,
+  savings,
+  store,
+  storeTotal,
+  onEntranceShown,
+  onPress,
+  onReveal,
+}: {
+  animateEntrance: boolean;
+  priciestStoreName: string;
+  revealPlayed: boolean;
+  savings: number;
+  store?: Store;
+  storeTotal: StoreCartTotal;
+  onEntranceShown: () => void;
+  onPress: () => void;
+  onReveal: () => void;
+}) {
+  const reducedMotion = useReducedMotion();
+  const scale = useSharedValue(reducedMotion || !animateEntrance ? 1 : 0.96);
+  const shouldShowSavings = (reducedMotion || revealPlayed) && savings > 0;
+
+  useEffect(() => {
+    if (reducedMotion) {
+      return;
+    }
+
+    if (animateEntrance) {
+      scale.set(withSpring(1, Motion.springGentle));
+    }
+    if (savings <= 0 || revealPlayed) {
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      onReveal();
+      tapSuccess();
+    }, 350);
+
+    return () => clearTimeout(timeout);
+  }, [animateEntrance, onReveal, reducedMotion, revealPlayed, savings, scale]);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.get() }],
+  }));
+
+  return (
+    <Animated.View
+      entering={
+        animateEntrance ? (reducedMotion ? FadeIn : FadeInUp).duration(Motion.base) : undefined
+      }
+      onLayout={onEntranceShown}
+      style={animatedStyle}>
+      <PressableScale
+        accessibilityRole="button"
+        accessibilityLabel={`Open bill for ${store?.name ?? storeTotal.storeId}`}
+        onPress={onPress}>
+        <Card surface="hero" style={styles.heroCard}>
+          <ThemedText type="displayXL" themeColor="onHero" numberOfLines={2}>
+            {store?.name ?? storeTotal.storeId}
+          </ThemedText>
+          <ThemedText type="small" themeColor="onHeroMuted">
+            {formatStoreMeta(store)}
+          </ThemedText>
+
+          <View style={styles.heroTotal}>
+            <ThemedText type="eyebrow" themeColor="onHeroMuted">
+              TOTAL BILL
+            </ThemedText>
+            <AnimatedPriceText value={storeTotal.total} size="hero" color="dealTag" />
+          </View>
+
+          {shouldShowSavings ? (
+            <SavingsTag
+              stamp={!reducedMotion}
+              holeColor="heroSurface"
+              label={`Saves ${formatPrice(savings)} vs ${priciestStoreName}`}
+            />
+          ) : null}
+
+          <View style={styles.heroChipRow}>
+            <Chip label={formatCoverage(storeTotal)} tone="hero" />
+            {storeTotal.substitutionCount > 0 ? (
+              <Chip label={formatSubstitutions(storeTotal.substitutionCount)} tone="hero" />
+            ) : null}
+            {storeTotal.missingItems.length > 0 ? (
+              <Chip label={formatMissingItems(storeTotal.missingItems.length)} tone="hero" />
+            ) : null}
+          </View>
+          <FreshnessStamp inverse capturedAt={storeTotal.pricesAsOf} />
+        </Card>
+      </PressableScale>
+    </Animated.View>
+  );
+}
+
+function OtherStoresSection({
+  animateEntrance,
+  storeById,
+  stores,
+  winner,
+  onSelectStore,
+}: {
+  animateEntrance: boolean;
+  storeById: ReadonlyMap<string, Store>;
+  stores: StoreCartTotal[];
+  winner: StoreCartTotal;
+  onSelectStore: (storeId: string) => void;
+}) {
+  const reducedMotion = useReducedMotion();
+
+  return (
+    <Animated.View
+      entering={animateEntrance ? entrance(0, reducedMotion) : undefined}
+      style={styles.section}>
+      <View style={styles.sectionHeader}>
+        <ThemedText type="eyebrow">OTHER STORES</ThemedText>
+        <ThemedText type="caption" themeColor="textSecondary">
+          Sorted by total bill
+        </ThemedText>
+      </View>
+      <View style={styles.storeCardStack}>
+        {stores.map((storeTotal, index) => (
+          <Animated.View
+            key={storeTotal.storeId}
+            entering={animateEntrance ? entrance(index + 1, reducedMotion) : undefined}>
+            <OtherStoreCard
+              rank={index + 2}
+              store={storeById.get(storeTotal.storeId)}
+              storeTotal={storeTotal}
+              winnerTotal={winner.total}
+              onPress={() => onSelectStore(storeTotal.storeId)}
+            />
+          </Animated.View>
+        ))}
+      </View>
+    </Animated.View>
+  );
+}
+
+function OtherStoreCard({
+  rank,
+  store,
+  storeTotal,
+  winnerTotal,
+  onPress,
+}: {
+  rank: number;
+  store?: Store;
+  storeTotal: StoreCartTotal;
+  winnerTotal: number;
+  onPress: () => void;
+}) {
+  const theme = useTheme();
+
+  return (
+    <PressableScale
+      accessibilityRole="button"
+      accessibilityLabel={`Open bill for ${store?.name ?? storeTotal.storeId}`}
+      onPress={onPress}>
+      <Card style={styles.otherStoreCard}>
+        <View style={styles.otherStoreTop}>
+          <View style={[styles.rankCircle, { backgroundColor: theme.backgroundSelected }]}>
+            <ThemedText type="smallBold" themeColor="textSecondary">
+              {rank}
+            </ThemedText>
+          </View>
+          <View style={styles.storeCopy}>
+            <ThemedText type="heading" numberOfLines={1}>
+              {store?.name ?? storeTotal.storeId}
+            </ThemedText>
+            <ThemedText type="caption" themeColor="textSecondary" numberOfLines={1}>
+              {formatStoreMeta(store)}
+            </ThemedText>
+          </View>
+          <View style={styles.otherStorePrice}>
+            <PriceText value={storeTotal.total} size="lg" />
+            <ThemedText type="caption" themeColor="textSecondary">
+              +{formatPrice(storeTotal.total - winnerTotal)} vs cheapest
+            </ThemedText>
+          </View>
+        </View>
+        <View style={styles.cardChipRow}>
+          <Chip label={formatCoverage(storeTotal)} tone="neutral" />
+          {storeTotal.substitutionCount > 0 ? (
+            <Chip label={formatSubstitutions(storeTotal.substitutionCount)} tone="deal" />
+          ) : null}
+          {storeTotal.missingItems.length > 0 ? (
+            <Chip label={formatMissingItems(storeTotal.missingItems.length)} tone="danger" />
+          ) : null}
+        </View>
+        <FreshnessStamp capturedAt={storeTotal.pricesAsOf} />
+      </Card>
+    </PressableScale>
   );
 }
 
@@ -164,11 +385,14 @@ function StoreBillDetail({
   storeTotal: StoreCartTotal;
   onBack: () => void;
 }) {
+  const reducedMotion = useReducedMotion();
+  const theme = useTheme();
+
   return (
     <ScreenShell>
       <TopBar label="Store totals" onBack={onBack} />
 
-      <View style={styles.header}>
+      <Animated.View entering={entrance(0, reducedMotion)} style={styles.header}>
         <ThemedText type="eyebrow" themeColor="accent">
           ITEMIZED BILL
         </ThemedText>
@@ -178,34 +402,35 @@ function StoreBillDetail({
         <ThemedText type="small" themeColor="textSecondary">
           {formatStoreMeta(store)}
         </ThemedText>
-      </View>
+      </Animated.View>
 
-      <Card style={styles.billSummaryCard}>
-        <View style={styles.billSummaryCopy}>
-          <ThemedText type="eyebrow" themeColor="accent">
-            TOTAL BILL
-          </ThemedText>
-          <PriceText value={storeTotal.total} size="hero" color="accent" />
-        </View>
-        <View style={styles.billSummaryMeta}>
-          <Chip label={formatCoverage(storeTotal)} tone="neutral" />
-          {storeTotal.substitutionCount > 0 ? (
-            <Chip label={formatSubstitutions(storeTotal.substitutionCount)} tone="deal" />
-          ) : null}
-          <FreshnessStamp capturedAt={storeTotal.pricesAsOf} />
-        </View>
-      </Card>
+      <Animated.View entering={entrance(1, reducedMotion)}>
+        <Card style={styles.billSummaryCard}>
+          <View style={styles.billSummaryCopy}>
+            <ThemedText type="eyebrow" themeColor="accent">
+              TOTAL BILL
+            </ThemedText>
+            <PriceText value={storeTotal.total} size="hero" color="accent" />
+          </View>
+          <View style={styles.billSummaryMeta}>
+            <Chip label={formatCoverage(storeTotal)} tone="neutral" />
+            {storeTotal.substitutionCount > 0 ? (
+              <Chip label={formatSubstitutions(storeTotal.substitutionCount)} tone="deal" />
+            ) : null}
+            <FreshnessStamp capturedAt={storeTotal.pricesAsOf} />
+          </View>
+        </Card>
+      </Animated.View>
 
-      <View style={styles.section}>
+      <Animated.View entering={entrance(2, reducedMotion)} style={styles.section}>
         <ThemedText type="eyebrow">ITEMS</ThemedText>
         <Card flush>
           {storeTotal.lines.length > 0 ? (
-            storeTotal.lines.map((line, index) => (
+            storeTotal.lines.map((line) => (
               <BillLineRow
                 key={`${line.productId}-${line.substitutedProductId ?? 'exact'}`}
                 line={line}
                 product={productById.get(line.productId)}
-                showSeparator={index < storeTotal.lines.length - 1}
               />
             ))
           ) : (
@@ -215,11 +440,15 @@ function StoreBillDetail({
               </ThemedText>
             </View>
           )}
+          <View style={[styles.billTotalRow, { borderTopColor: theme.border }]}>
+            <ThemedText type="smallBold">TOTAL</ThemedText>
+            <PriceText value={storeTotal.total} size="md" />
+          </View>
         </Card>
-      </View>
+      </Animated.View>
 
       {storeTotal.missingItems.length > 0 ? (
-        <View style={styles.section}>
+        <Animated.View entering={entrance(3, reducedMotion)} style={styles.section}>
           <ThemedText type="eyebrow">MISSING ITEMS</ThemedText>
           <Card flush>
             {storeTotal.missingItems.map((productId, index) => {
@@ -230,9 +459,14 @@ function StoreBillDetail({
                   key={productId}
                   style={[
                     styles.missingRow,
-                    index < storeTotal.missingItems.length - 1 && styles.rowSeparator,
+                    index > 0 && styles.solidTopSeparator,
+                    index > 0 && { borderTopColor: theme.border },
                   ]}>
-                  <ProductThumb imageUrl={product?.imageUrl ?? null} name={product?.name ?? productId} size={40} />
+                  <ProductThumb
+                    imageUrl={product?.imageUrl ?? null}
+                    name={product?.name ?? productId}
+                    size={40}
+                  />
                   <View style={styles.missingCopy}>
                     <ThemedText type="smallBold" numberOfLines={2}>
                       {product?.name ?? formatProductId(productId)}
@@ -245,96 +479,18 @@ function StoreBillDetail({
               );
             })}
           </Card>
-        </View>
+        </Animated.View>
       ) : null}
     </ScreenShell>
-  );
-}
-
-function StoreTotalCard({
-  isCheapest,
-  store,
-  storeTotal,
-  worstTotal,
-  onPress,
-}: {
-  isCheapest: boolean;
-  store?: Store;
-  storeTotal: StoreCartTotal;
-  worstTotal: number;
-  onPress: () => void;
-}) {
-  const theme = useTheme();
-  const savings = Math.max(0, worstTotal - storeTotal.total);
-
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`Open bill for ${store?.name ?? storeTotal.storeId}`}
-      onPress={onPress}
-      style={({ pressed }) => [pressed && styles.pressed]}>
-      <Card
-        style={[
-          styles.storeCard,
-          isCheapest && {
-            backgroundColor: theme.accentMuted,
-            borderColor: theme.accent,
-          },
-        ]}>
-        <View style={styles.storeCardHeader}>
-          <View style={styles.storeTitleBlock}>
-            <View style={styles.storeTitleRow}>
-              <ThemedText type="heading" numberOfLines={1} style={styles.storeTitle}>
-                {store?.name ?? storeTotal.storeId}
-              </ThemedText>
-              {isCheapest ? <Chip label="Cheapest total" tone="accent" /> : null}
-            </View>
-            <ThemedText type="caption" themeColor="textSecondary" numberOfLines={1}>
-              {formatStoreMeta(store)}
-            </ThemedText>
-          </View>
-          <SymbolView name={CHEVRON_ICON} tintColor={theme.textSecondary} size={16} />
-        </View>
-
-        <View style={styles.totalRow}>
-          <View style={styles.totalCopy}>
-            <ThemedText type="eyebrow" themeColor="accent">
-              TOTAL BILL
-            </ThemedText>
-            <PriceText value={storeTotal.total} size="lg" color={isCheapest ? 'accent' : 'text'} />
-          </View>
-          <View style={styles.totalMeta}>
-            {savings > 0 ? (
-              <Chip label={`Saves ${formatPrice(savings)}`} tone="deal" />
-            ) : null}
-            <FreshnessStamp capturedAt={storeTotal.pricesAsOf} />
-          </View>
-        </View>
-
-        <View style={styles.cardChipRow}>
-          <Chip label={formatCoverage(storeTotal)} tone="neutral" />
-          {storeTotal.substitutionCount > 0 ? (
-            <Chip label={formatSubstitutions(storeTotal.substitutionCount)} tone="deal" />
-          ) : (
-            <Chip label="No swaps" tone="neutral" />
-          )}
-          {storeTotal.missingItems.length > 0 ? (
-            <Chip label={formatMissingItems(storeTotal.missingItems.length)} tone="danger" />
-          ) : null}
-        </View>
-      </Card>
-    </Pressable>
   );
 }
 
 function BillLineRow({
   line,
   product,
-  showSeparator,
 }: {
   line: CartBillLine;
   product?: CartItem['product'];
-  showSeparator: boolean;
 }) {
   const theme = useTheme();
   const productName = product?.name ?? formatProductId(line.productId);
@@ -342,17 +498,12 @@ function BillLineRow({
   const meta = [product?.brand, size, `Qty ${line.qty} x ${formatPrice(line.unitPrice)}`]
     .filter(Boolean)
     .join(' · ');
-  const swapName = line.substitutedProductName ?? (
-    line.substitutedProductId ? formatProductId(line.substitutedProductId) : null
-  );
+  const swapName =
+    line.substitutedProductName ??
+    (line.substitutedProductId ? formatProductId(line.substitutedProductId) : null);
 
   return (
-    <View
-      style={[
-        styles.billLineRow,
-        showSeparator && styles.rowSeparator,
-        showSeparator && { borderBottomColor: theme.border },
-      ]}>
+    <View style={[styles.billLineRow, { borderBottomColor: theme.border }]}>
       <ProductThumb imageUrl={product?.imageUrl ?? null} name={productName} size={44} />
       <View style={styles.billLineCopy}>
         <ThemedText type="smallBold" numberOfLines={2}>
@@ -368,7 +519,7 @@ function BillLineRow({
         </ThemedText>
       </View>
       <View style={styles.linePriceBlock}>
-        <PriceText value={line.lineTotal} size="sm" color="text" />
+        <PriceText value={line.lineTotal} size="sm" />
         <FreshnessStamp capturedAt={line.capturedAt} style={styles.lineFreshness} />
       </View>
     </View>
@@ -391,23 +542,19 @@ function TopBar({ label, onBack }: { label: string; onBack: () => void }) {
   const theme = useTheme();
 
   return (
-    <Pressable
+    <PressableScale
       accessibilityRole="button"
       accessibilityLabel={label}
       hitSlop={8}
-      onPress={() => {
-        tapLight();
-        onBack();
-      }}
-      style={({ pressed }) => [
-        styles.backControl,
-        pressed && { backgroundColor: theme.backgroundSelected },
-      ]}>
-      <SymbolView name="chevron.left" tintColor={theme.accent} size={16} />
+      onPress={onBack}
+      style={styles.backControl}>
+      <View style={[styles.backCircle, { backgroundColor: theme.backgroundSelected }]}>
+        <SymbolView name={BACK_ICON} tintColor={theme.accent} size={16} />
+      </View>
       <ThemedText type="smallBold" themeColor="accent">
         {label}
       </ThemedText>
-    </Pressable>
+    </PressableScale>
   );
 }
 
@@ -479,16 +626,9 @@ function formatProductId(productId: string) {
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-  },
-  safeArea: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  scrollView: {
-    width: '100%',
-  },
+  screen: { flex: 1 },
+  safeArea: { flex: 1, alignItems: 'center' },
+  scrollView: { width: '100%' },
   content: {
     width: '100%',
     maxWidth: MaxContentWidth,
@@ -499,21 +639,24 @@ const styles = StyleSheet.create({
     gap: Spacing.three,
   },
   backControl: {
-    minHeight: 44,
+    minHeight: 36,
     alignSelf: 'flex-start',
-    borderRadius: Radii.control,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.one,
-    paddingHorizontal: Spacing.two,
-    paddingRight: Spacing.three,
-  },
-  header: {
-    gap: Spacing.one,
-  },
-  section: {
     gap: Spacing.two,
   },
+  backCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: Radii.chip,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  header: { gap: Spacing.one },
+  heroCard: { gap: Spacing.two },
+  heroTotal: { gap: Spacing.half, paddingTop: Spacing.two },
+  heroChipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.one },
+  section: { gap: Spacing.two },
   sectionHeader: {
     minHeight: 24,
     flexDirection: 'row',
@@ -521,63 +664,22 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: Spacing.three,
   },
-  storeCardStack: {
-    gap: Spacing.two,
-  },
-  storeCard: {
-    gap: Spacing.three,
-  },
-  storeCardHeader: {
-    flexDirection: 'row',
+  storeCardStack: { gap: Spacing.two },
+  otherStoreCard: { gap: Spacing.three },
+  otherStoreTop: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  rankCircle: {
+    width: 28,
+    height: 28,
+    borderRadius: Radii.chip,
     alignItems: 'center',
-    gap: Spacing.two,
+    justifyContent: 'center',
   },
-  storeTitleBlock: {
-    flex: 1,
-    minWidth: 0,
-    gap: Spacing.half,
-  },
-  storeTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: Spacing.two,
-  },
-  storeTitle: {
-    flexShrink: 1,
-    minWidth: 0,
-  },
-  totalRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    justifyContent: 'space-between',
-    gap: Spacing.three,
-  },
-  totalCopy: {
-    gap: Spacing.half,
-  },
-  totalMeta: {
-    alignItems: 'flex-end',
-    gap: Spacing.one,
-    flexShrink: 1,
-  },
-  cardChipRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Spacing.one,
-  },
-  billSummaryCard: {
-    gap: Spacing.three,
-  },
-  billSummaryCopy: {
-    gap: Spacing.one,
-  },
-  billSummaryMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: Spacing.two,
-  },
+  storeCopy: { flex: 1, minWidth: 0, gap: Spacing.half },
+  otherStorePrice: { alignItems: 'flex-end', gap: Spacing.half },
+  cardChipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.one },
+  billSummaryCard: { gap: Spacing.three },
+  billSummaryCopy: { gap: Spacing.one },
+  billSummaryMeta: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: Spacing.two },
   billLineRow: {
     minHeight: 88,
     paddingHorizontal: Spacing.three,
@@ -585,19 +687,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.three,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderStyle: 'dashed',
   },
-  billLineCopy: {
-    flex: 1,
-    minWidth: 0,
-    gap: Spacing.half,
-  },
-  linePriceBlock: {
-    alignItems: 'flex-end',
-    gap: Spacing.one,
-    maxWidth: 112,
-  },
-  lineFreshness: {
-    maxWidth: 112,
+  billLineCopy: { flex: 1, minWidth: 0, gap: Spacing.half },
+  linePriceBlock: { alignItems: 'flex-end', gap: Spacing.one, maxWidth: 112 },
+  lineFreshness: { maxWidth: 112 },
+  billTotalRow: {
+    minHeight: 64,
+    paddingHorizontal: Spacing.three,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderStyle: 'dashed',
   },
   missingRow: {
     minHeight: 68,
@@ -607,22 +710,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.three,
   },
-  missingCopy: {
-    flex: 1,
-    minWidth: 0,
-    gap: Spacing.one,
-  },
-  rowSeparator: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  emptyCardRow: {
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.three,
-  },
-  skeletonCard: {
-    gap: Spacing.two,
-  },
-  pressed: {
-    opacity: 0.72,
-  },
+  missingCopy: { flex: 1, minWidth: 0, gap: Spacing.one },
+  solidTopSeparator: { borderTopWidth: StyleSheet.hairlineWidth },
+  emptyCardRow: { paddingHorizontal: Spacing.three, paddingVertical: Spacing.three },
+  skeletonCard: { gap: Spacing.two },
 });

@@ -1,22 +1,27 @@
 import type { Store } from '@cartwise/shared';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Animated, { useReducedMotion } from 'react-native-reanimated';
 
 import type { PriceAlert } from '@/api/client';
 import { useAlerts, useMarkAlertRead, useRemoveWatch, useStores } from '@/api/queries';
+import { BrandRow } from '@/components/brand-row';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { AppButton } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Chip } from '@/components/ui/chip';
 import { EmptyState } from '@/components/ui/empty-state';
+import { FreshnessStamp } from '@/components/ui/freshness-stamp';
+import { PressableScale } from '@/components/ui/pressable-scale';
 import { PriceText } from '@/components/ui/price-text';
+import { SavingsTag } from '@/components/ui/savings-tag';
 import { Skeleton } from '@/components/ui/skeleton';
 import { BottomTabInset, MaxContentWidth, Radii, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { chainLabel, formatPrice, formatRelativeTime } from '@/lib/price';
+import { entrance } from '@/lib/motion';
+import { chainLabel, formatPrice } from '@/lib/price';
 import {
   getPushPermissionStatus,
   registerForPriceAlerts,
@@ -47,6 +52,7 @@ export default function AlertsScreen() {
   const storesQuery = useStores(zip);
   const markAlertRead = useMarkAlertRead();
   const removeWatch = useRemoveWatch();
+  const reducedMotion = useReducedMotion();
 
   useEffect(() => {
     let isMounted = true;
@@ -132,7 +138,7 @@ export default function AlertsScreen() {
           contentContainerStyle={styles.content}
           style={styles.scrollView}>
           <View style={styles.header}>
-            <ThemedText type="eyebrow">CARTWISE</ThemedText>
+            <BrandRow />
             <ThemedText type="display">Alerts</ThemedText>
             <ThemedText type="small" themeColor="textSecondary">
               Price drops on items you watch.
@@ -140,12 +146,14 @@ export default function AlertsScreen() {
           </View>
 
           {!isPermissionReady ? (
-            <PermissionCard
-              disabled={isRegistering}
-              message={permissionMessage}
-              permissionStatus={permissionStatus}
-              onEnable={handleEnableAlerts}
-            />
+            <Animated.View entering={entrance(0, reducedMotion)}>
+              <PermissionCard
+                disabled={isRegistering}
+                message={permissionMessage}
+                permissionStatus={permissionStatus}
+                onEnable={handleEnableAlerts}
+              />
+            </Animated.View>
           ) : alertsQuery.isLoading ? (
             <AlertsLoadingState />
           ) : alertsQuery.isError ? (
@@ -200,7 +208,7 @@ function PermissionCard({
   return (
     <Card style={styles.permissionCard}>
       <View style={[styles.iconWell, { backgroundColor: theme.accentMuted }]}>
-        <SymbolView name={bellIcon} tintColor={theme.accent} size={26} />
+        <SymbolView name={bellIcon} tintColor={theme.accent} size={28} />
       </View>
       <View style={styles.permissionCopy}>
         <ThemedText type="heading">Know when prices drop</ThemedText>
@@ -244,9 +252,10 @@ function RecentDropsSection({
   onMarkRead: (alertId: string) => void;
 }) {
   const theme = useTheme();
+  const reducedMotion = useReducedMotion();
 
   return (
-    <View style={styles.section}>
+    <Animated.View entering={entrance(0, reducedMotion)} style={styles.section}>
       <SectionHeader label="RECENT DROPS" count={`${alerts.length} drops`} />
 
       {alerts.length === 0 ? (
@@ -262,21 +271,21 @@ function RecentDropsSection({
             const store = storeById.get(alert.storeId);
 
             return (
-              <Pressable
+              <PressableScale
                 key={alert.id}
                 accessibilityRole="button"
                 accessibilityLabel={`Mark ${alert.productName} price drop as read`}
+                accessibilityState={{ disabled }}
                 disabled={disabled}
                 onPress={() => {
                   if (!alert.read) {
                     onMarkRead(alert.id);
                   }
                 }}
-                style={({ pressed }) => [
+                style={[
                   styles.dropRow,
                   index > 0 && styles.rowDivider,
                   index > 0 && { borderTopColor: theme.border },
-                  pressed && { backgroundColor: theme.backgroundSelected },
                   disabled && styles.disabled,
                 ]}>
                 <View style={styles.unreadSlot}>
@@ -299,19 +308,25 @@ function RecentDropsSection({
                     <ThemedText type="caption" themeColor="textSecondary">
                       →
                     </ThemedText>
-                    <PriceText value={alert.newPrice} size="sm" color="accent" />
-                    <Chip label={`−${formatPrice(savings)}`} tone="deal" />
+                    <PriceText value={alert.newPrice} size="md" color="accent" />
+                    {savings > 0 ? (
+                      <SavingsTag
+                        size="sm"
+                        holeColor="backgroundElement"
+                        label={`Down ${formatPrice(savings)}`}
+                      />
+                    ) : null}
                   </View>
                 </View>
-                <ThemedText type="stamp" style={styles.dropTime}>
-                  {formatRelativeTime(alert.capturedAt) ?? 'freshness unknown'}
-                </ThemedText>
-              </Pressable>
+                <View style={styles.dropTime}>
+                  <FreshnessStamp capturedAt={alert.capturedAt} />
+                </View>
+              </PressableScale>
             );
           })}
         </Card>
       )}
-    </View>
+    </Animated.View>
   );
 }
 
@@ -337,9 +352,10 @@ function WatchedItemsSection({
   onRemove: (watchId: string, productName: string) => void;
 }) {
   const theme = useTheme();
+  const reducedMotion = useReducedMotion();
 
   return (
-    <View style={styles.section}>
+    <Animated.View entering={entrance(1, reducedMotion)} style={styles.section}>
       <SectionHeader label="WATCHED ITEMS" count={`${watches.length} watched`} />
 
       {watches.length === 0 ? (
@@ -378,7 +394,7 @@ function WatchedItemsSection({
           ))}
         </Card>
       )}
-    </View>
+    </Animated.View>
   );
 }
 
@@ -474,8 +490,8 @@ const styles = StyleSheet.create({
     gap: Spacing.three,
   },
   iconWell: {
-    width: 52,
-    height: 52,
+    width: 64,
+    height: 64,
     borderRadius: Radii.chip,
     alignItems: 'center',
     justifyContent: 'center',
@@ -517,8 +533,8 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.one,
   },
   dropTime: {
-    minWidth: 72,
-    textAlign: 'right',
+    minWidth: 96,
+    alignItems: 'flex-end',
     paddingTop: Spacing.half,
   },
   watchRow: {

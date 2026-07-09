@@ -4,6 +4,7 @@ import { FontFamilies, Fonts, ThemeColor } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
 export type ThemedTextType =
+  | 'displayXL'
   | 'display'
   | 'title'
   | 'heading'
@@ -38,16 +39,23 @@ export function ThemedText({ style, type = 'default', themeColor, ...rest }: The
 }
 
 const styles = StyleSheet.create({
+  displayXL: {
+    fontFamily: FontFamilies.displayExtraBold,
+    fontSize: 40,
+    lineHeight: 44,
+    letterSpacing: -0.8,
+  },
   display: {
-    fontFamily: FontFamilies.displayBold,
-    fontSize: 32,
-    lineHeight: 36,
-    letterSpacing: 0,
+    fontFamily: FontFamilies.displayExtraBold,
+    fontSize: 34,
+    lineHeight: 38,
+    letterSpacing: -0.5,
   },
   title: {
-    fontFamily: FontFamilies.displaySemiBold,
+    fontFamily: FontFamilies.displayBold,
     fontSize: 22,
     lineHeight: 28,
+    letterSpacing: -0.2,
   },
   heading: {
     fontSize: 17,
@@ -83,7 +91,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 16,
     fontWeight: 700,
-    letterSpacing: 0,
+    letterSpacing: 1.2,
     textTransform: 'uppercase',
   },
   stamp: {
@@ -104,7 +112,6 @@ const styles = StyleSheet.create({
   linkPrimary: {
     lineHeight: 30,
     fontSize: 14,
-    color: '#3c87f7',
   },
   code: {
     fontFamily: Fonts.mono,

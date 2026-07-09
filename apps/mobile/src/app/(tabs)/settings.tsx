@@ -1,23 +1,43 @@
+import { SymbolView, type SymbolViewProps } from 'expo-symbols';
+import Constants from 'expo-constants';
 import { useMemo } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useNearbyStores } from '@/api/queries';
+import { BrandRow } from '@/components/brand-row';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { AppButton } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { PressableScale } from '@/components/ui/pressable-scale';
+import { BottomTabInset, MaxContentWidth, Radii, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { chainLabel } from '@/lib/price';
 import { usePreferencesStore } from '@/state/preferences';
+
+const LOCATION_ICON = {
+  ios: 'location.fill',
+  android: 'location_on',
+  web: 'location_on',
+} satisfies SymbolViewProps['name'];
+
+const STORE_ICON = {
+  ios: 'storefront',
+  android: 'storefront',
+  web: 'storefront',
+} satisfies SymbolViewProps['name'];
+
+const CHEVRON_ICON = {
+  ios: 'chevron.right',
+  android: 'chevron_right',
+  web: 'chevron_right',
+} satisfies SymbolViewProps['name'];
 
 export default function SettingsScreen() {
   const zip = usePreferencesStore((state) => state.zip);
   const resetLocation = usePreferencesStore((state) => state.resetLocation);
   const storesQuery = useNearbyStores(zip);
   const theme = useTheme();
-
   const activeStores = useMemo(() => storesQuery.data?.stores ?? [], [storesQuery.data?.stores]);
 
   return (
@@ -25,49 +45,57 @@ export default function SettingsScreen() {
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         <ScrollView contentContainerStyle={styles.content} style={styles.scrollView}>
           <View style={styles.header}>
-            <ThemedText type="eyebrow">CARTWISE</ThemedText>
+            <BrandRow />
             <ThemedText type="display">Settings</ThemedText>
           </View>
 
-          <Card style={styles.locationCard}>
-            <View style={styles.locationCopy}>
-              <ThemedText type="eyebrow">LOCATION</ThemedText>
-              <ThemedText type="title" themeColor={zip ? 'text' : 'textSecondary'}>
-                {zip || 'Not set'}
-              </ThemedText>
-            </View>
-            <AppButton
-              label="Change location"
-              variant="secondary"
-              onPress={resetLocation}
-              style={styles.locationButton}
-            />
-          </Card>
+          <View style={styles.section}>
+            <ThemedText type="eyebrow">LOCATION</ThemedText>
+            <Card flush>
+              <PressableScale
+                accessibilityRole="button"
+                accessibilityLabel={`Change location, currently ${zip || 'not set'}`}
+                onPress={resetLocation}
+                style={styles.settingRow}>
+                <IconWell icon={LOCATION_ICON} />
+                <View style={styles.rowCopy}>
+                  <ThemedText type="smallBold">ZIP code</ThemedText>
+                  <ThemedText type="caption" themeColor="textSecondary">
+                    {zip || 'Not set'}
+                  </ThemedText>
+                </View>
+                <SymbolView name={CHEVRON_ICON} tintColor={theme.textSecondary} size={18} />
+              </PressableScale>
+            </Card>
+          </View>
 
           <View style={styles.section}>
             <SectionHeader label="NEARBY STORES" count={`${activeStores.length} stores`} />
-
             <Card flush>
               {activeStores.length > 0 ? (
                 activeStores.map((store, index) => (
                   <View
                     key={store.id}
                     style={[
-                      styles.storeRow,
+                      styles.settingRow,
                       index > 0 && styles.rowDivider,
                       index > 0 && { borderTopColor: theme.border },
                     ]}>
-                    <ThemedText type="smallBold" numberOfLines={1}>
-                      {store.name}
-                    </ThemedText>
-                    <ThemedText type="caption" themeColor="textSecondary" numberOfLines={1}>
-                      {chainLabel(store.chain)} · {formatDistance(store.distanceMiles)} mi
-                    </ThemedText>
+                    <IconWell icon={STORE_ICON} />
+                    <View style={styles.rowCopy}>
+                      <ThemedText type="smallBold" numberOfLines={1}>
+                        {store.name}
+                      </ThemedText>
+                      <ThemedText type="caption" themeColor="textSecondary" numberOfLines={1}>
+                        {chainLabel(store.chain)} · {formatDistance(store.distanceMiles)} mi
+                      </ThemedText>
+                    </View>
                   </View>
                 ))
               ) : (
-                <View style={styles.storeRow}>
-                  <ThemedText type="small" themeColor="textSecondary">
+                <View style={styles.settingRow}>
+                  <IconWell icon={STORE_ICON} />
+                  <ThemedText type="caption" themeColor="textSecondary" style={styles.rowCopy}>
                     Cartwise is comparing all nearby stores for this location.
                   </ThemedText>
                 </View>
@@ -75,13 +103,29 @@ export default function SettingsScreen() {
             </Card>
           </View>
 
-          <ThemedText type="stamp" style={styles.footer}>
-            Cartwise compares Kroger, Walmart, Target, and ALDI. Prices are cached briefly and
-            always stamped.
-          </ThemedText>
+          <View style={styles.footer}>
+            {Constants.expoConfig?.version ? (
+              <ThemedText type="caption" themeColor="textSecondary" style={styles.footerText}>
+                Cartwise {Constants.expoConfig.version}
+              </ThemedText>
+            ) : null}
+            <ThemedText type="caption" themeColor="textSecondary" style={styles.footerText}>
+              Cartwise compares Kroger, Walmart, Target, and ALDI. Prices are cached briefly and
+              always stamped.
+            </ThemedText>
+          </View>
         </ScrollView>
       </SafeAreaView>
     </ThemedView>
+  );
+}
+
+function IconWell({ icon }: { icon: SymbolViewProps['name'] }) {
+  const theme = useTheme();
+  return (
+    <View style={[styles.iconWell, { backgroundColor: theme.accentMuted }]}>
+      <SymbolView name={icon} tintColor={theme.accent} size={18} />
+    </View>
   );
 }
 
@@ -101,16 +145,9 @@ function formatDistance(distanceMiles: number | undefined) {
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-  },
-  safeArea: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  scrollView: {
-    width: '100%',
-  },
+  screen: { flex: 1 },
+  safeArea: { flex: 1, alignItems: 'center' },
+  scrollView: { width: '100%' },
   content: {
     width: '100%',
     maxWidth: MaxContentWidth,
@@ -120,21 +157,8 @@ const styles = StyleSheet.create({
     paddingBottom: BottomTabInset + Spacing.five,
     gap: Spacing.four,
   },
-  header: {
-    gap: Spacing.one,
-  },
-  locationCard: {
-    gap: Spacing.three,
-  },
-  locationCopy: {
-    gap: Spacing.one,
-  },
-  locationButton: {
-    alignSelf: 'flex-start',
-  },
-  section: {
-    gap: Spacing.two,
-  },
+  header: { gap: Spacing.one },
+  section: { gap: Spacing.two },
   sectionHeader: {
     minHeight: 24,
     flexDirection: 'row',
@@ -142,16 +166,23 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: Spacing.three,
   },
-  storeRow: {
-    minHeight: 64,
+  settingRow: {
+    minHeight: 68,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.three,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
+  },
+  iconWell: {
+    width: 36,
+    height: 36,
+    borderRadius: Radii.chip,
+    alignItems: 'center',
     justifyContent: 'center',
-    gap: Spacing.one,
-    padding: Spacing.three,
   },
-  rowDivider: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
-  footer: {
-    paddingBottom: Spacing.two,
-  },
+  rowCopy: { flex: 1, minWidth: 0, gap: Spacing.half },
+  rowDivider: { borderTopWidth: StyleSheet.hairlineWidth },
+  footer: { gap: Spacing.one, paddingBottom: Spacing.two },
+  footerText: { textAlign: 'center' },
 });

@@ -14,7 +14,7 @@ import Animated, {
   useAnimatedStyle,
   useReducedMotion,
   useSharedValue,
-  withTiming,
+  withSpring,
 } from 'react-native-reanimated';
 
 import {
@@ -23,6 +23,7 @@ import {
   useSearchProducts,
   useUpdateCartItem,
 } from '@/api/queries';
+import { BrandRow } from '@/components/brand-row';
 import { BrandFirstSearchResults } from '@/components/search/brand-first-results';
 import { SourceStatusBanner } from '@/components/source-status-banner';
 import { ThemedText } from '@/components/themed-text';
@@ -33,6 +34,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   BottomTabInset,
+  Elevation,
   MaxContentWidth,
   Motion,
   Radii,
@@ -40,6 +42,7 @@ import {
   type ThemeColor,
 } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { entrance } from '@/lib/motion';
 import { usePreferencesStore } from '@/state/preferences';
 
 const MIN_SEARCH_LENGTH = 2;
@@ -78,6 +81,7 @@ export default function SearchScreen() {
   const cartQuery = useCurrentCart();
   const updateCartItem = useUpdateCartItem();
   const theme = useTheme();
+  const reducedMotion = useReducedMotion();
 
   const cartQtyByProductId = useMemo(
     () => new Map((cartQuery.data?.cart.items ?? []).map((item) => [item.productId, item.qty])),
@@ -144,27 +148,22 @@ export default function SearchScreen() {
           contentContainerStyle={styles.content}
           style={styles.scrollView}>
           <View style={styles.header}>
-            <View style={styles.kickerRow}>
-              <ThemedText type="eyebrow" themeColor="accent">
-                CARTWISE
-              </ThemedText>
-            </View>
+            <BrandRow
+              right={
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Change location, currently ZIP ${zip}`}
+                  hitSlop={8}
+                  onPress={resetLocation}
+                  style={({ pressed }) => [styles.statusZipButton, pressed && styles.pressed]}>
+                  <Chip label={`ZIP ${zip}`} tone="accent" />
+                </Pressable>
+              }
+            />
             <ThemedText type="display" style={styles.title}>
               Build your cart
             </ThemedText>
-            <View
-              style={[
-                styles.storeStatusCard,
-                { backgroundColor: theme.backgroundElement, borderColor: theme.border },
-              ]}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`Change location, currently ZIP ${zip}`}
-                hitSlop={8}
-                onPress={resetLocation}
-                style={({ pressed }) => [styles.statusZipButton, pressed && styles.pressed]}>
-                <Chip label={`ZIP ${zip}`} tone="accent" />
-              </Pressable>
+            <View style={styles.storeStatusRow}>
               <View style={[styles.statusDot, { backgroundColor: theme[storeStatus.tone] }]} />
               <ThemedText
                 type="small"
@@ -184,7 +183,10 @@ export default function SearchScreen() {
             onSubmit={submitSearch}
           />
 
-          <View style={styles.resultsSection}>
+          <Animated.View
+            key={hasSearch ? searchRequestSignature : 'search-idle'}
+            entering={entrance(0, reducedMotion)}
+            style={styles.resultsSection}>
             {!shouldUseBrandFlow ? (
               <View style={styles.resultsHeader}>
                 <ThemedText type="eyebrow" themeColor="accent">
@@ -239,7 +241,7 @@ export default function SearchScreen() {
                 onSelectBrand={setSelectedBrand}
               />
             )}
-          </View>
+          </Animated.View>
         </ScrollView>
       </SafeAreaView>
     </ThemedView>
@@ -264,13 +266,16 @@ function SearchField({
   const focusProgress = useSharedValue(0);
 
   const animatedBorderStyle = useAnimatedStyle(() => ({
-    borderColor: interpolateColor(focusProgress.get(), [0, 1], [theme.border, theme.accent]),
+    borderColor: interpolateColor(
+      focusProgress.get(),
+      [0, 1],
+      [theme.backgroundElement, theme.accent],
+    ),
+    transform: [{ scale: reducedMotion ? 1 : 1 + focusProgress.get() * 0.01 }],
   }));
 
   function setFocusProgress(nextValue: number) {
-    focusProgress.set(
-      reducedMotion ? nextValue : withTiming(nextValue, { duration: Motion.fast }),
-    );
+    focusProgress.set(reducedMotion ? nextValue : withSpring(nextValue, Motion.springGentle));
   }
 
   return (
@@ -279,8 +284,8 @@ function SearchField({
         styles.searchField,
         {
           backgroundColor: theme.backgroundElement,
-          borderColor: theme.border,
-          shadowColor: theme.text,
+          borderColor: theme.backgroundElement,
+          shadowColor: theme.shadow,
         },
         animatedBorderStyle,
       ]}>
@@ -428,24 +433,14 @@ const styles = StyleSheet.create({
   header: {
     gap: Spacing.two,
   },
-  kickerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: Spacing.three,
-  },
   title: {
     flexShrink: 1,
   },
-  storeStatusCard: {
+  storeStatusRow: {
     minHeight: 44,
-    borderWidth: 1,
-    borderRadius: Radii.control,
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two,
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two,
   },
   statusZipButton: {
     flexShrink: 0,
@@ -460,18 +455,15 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   searchField: {
-    minHeight: 60,
+    height: 64,
     borderRadius: Radii.chip,
-    borderWidth: 1,
+    borderWidth: 2,
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two,
     paddingLeft: Spacing.three,
     paddingRight: Spacing.two,
-    shadowOpacity: 0.05,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 2,
+    ...Elevation.card,
   },
   searchInput: {
     flex: 1,
@@ -490,8 +482,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   submitButton: {
-    width: 40,
-    height: 40,
+    width: 44,
+    height: 44,
     borderRadius: Radii.chip,
     alignItems: 'center',
     justifyContent: 'center',

@@ -7,6 +7,7 @@ import { formatFreshnessStamp, freshnessTone, type FreshnessTone } from '@/lib/p
 
 export type FreshnessStampProps = ViewProps & {
   capturedAt?: string | null;
+  inverse?: boolean;
 };
 
 const toneColors: Record<FreshnessTone, ThemeColor> = {
@@ -20,14 +21,20 @@ const toneColors: Record<FreshnessTone, ThemeColor> = {
  * Accent dot = captured within 6h, neutral = within 48h, danger = older/unknown.
  * Every price row shows one; it is never hidden or dropped.
  */
-export function FreshnessStamp({ capturedAt, style, ...rest }: FreshnessStampProps) {
+export function FreshnessStamp({
+  capturedAt,
+  inverse = false,
+  style,
+  ...rest
+}: FreshnessStampProps) {
   const theme = useTheme();
-  const dotColor = toneColors[freshnessTone(capturedAt)];
+  const tone = freshnessTone(capturedAt);
+  const dotColor = inverse && tone === 'aging' ? 'onHeroMuted' : toneColors[tone];
 
   return (
     <View style={[styles.row, style]} {...rest}>
       <View style={[styles.dot, { backgroundColor: theme[dotColor] }]} />
-      <ThemedText type="stamp" numberOfLines={1}>
+      <ThemedText type="stamp" themeColor={inverse ? 'onHeroMuted' : undefined} numberOfLines={1}>
         {formatFreshnessStamp(capturedAt)}
       </ThemedText>
     </View>

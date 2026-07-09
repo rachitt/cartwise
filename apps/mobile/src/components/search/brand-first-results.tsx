@@ -1,7 +1,7 @@
 import type { Product } from '@cartwise/shared';
 import type { SearchResult } from '@/api/client';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import Animated, {
   FadeIn,
   FadeOut,
@@ -14,10 +14,12 @@ import { ThemedText } from '@/components/themed-text';
 import { AppButton } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Chip } from '@/components/ui/chip';
+import { PressableScale } from '@/components/ui/pressable-scale';
 import { ProductThumb as UiProductThumb } from '@/components/ui/product-thumb';
-import { Motion, Radii, Spacing } from '@/constants/theme';
+import { Motion, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { formatProductSize } from '@/lib/price';
+import { entrance } from '@/lib/motion';
+import { formatPrice, formatProductSize } from '@/lib/price';
 
 const OTHER_BRANDS = 'Other brands';
 const CHEVRON_ICON = {
@@ -48,6 +50,8 @@ type BrandGroup = {
   thumbnailProduct: Product;
   isOther: boolean;
   firstResultIndex: number;
+  minPrice: number;
+  maxPrice: number;
 };
 
 export function BrandFirstSearchResults({
@@ -111,6 +115,13 @@ function BrandList({
   brandGroups: BrandGroup[];
   onSelectBrand: (brand: string) => void;
 }) {
+  const reducedMotion = useReducedMotion();
+  const cheapestBrand = brandGroups.reduce<BrandGroup | null>(
+    (cheapest, brand) =>
+      cheapest === null || brand.minPrice < cheapest.minPrice ? brand : cheapest,
+    null,
+  );
+
   return (
     <>
       <View style={styles.sectionHeader}>
@@ -121,58 +132,63 @@ function BrandList({
           {brandGroups.length} brands
         </ThemedText>
       </View>
-      <Card flush style={styles.brandCard}>
+      <View style={styles.brandList}>
         {brandGroups.map((brand, index) => (
-          <BrandRow
-            key={brand.name}
-            brand={brand}
-            isLast={index === brandGroups.length - 1}
-            onPress={() => onSelectBrand(brand.name)}
-          />
+          <Animated.View key={brand.name} entering={entrance(index, reducedMotion)}>
+            <BrandCard
+              brand={brand}
+              isCheapest={brand.name === cheapestBrand?.name}
+              onPress={() => onSelectBrand(brand.name)}
+            />
+          </Animated.View>
         ))}
-      </Card>
+      </View>
     </>
   );
 }
 
-function BrandRow({
+function BrandCard({
   brand,
-  isLast,
+  isCheapest,
   onPress,
 }: {
   brand: BrandGroup;
-  isLast: boolean;
+  isCheapest: boolean;
   onPress: () => void;
 }) {
-  const theme = useTheme();
   const displayName = formatDisplayName(brand.name);
   const productLabel = `${brand.productCount} ${brand.productCount === 1 ? 'product' : 'products'}`;
+  const priceRange =
+    brand.minPrice === brand.maxPrice
+      ? formatPrice(brand.minPrice)
+      : `${formatPrice(brand.minPrice)}–${formatPrice(brand.maxPrice)}`;
 
   return (
-    <View
-      style={[
-        styles.brandRowShell,
-        { borderBottomColor: theme.border },
-        isLast && styles.lastRow,
-      ]}>
-      <Pressable
+    <PressableScale
         accessibilityRole="button"
         accessibilityLabel={`Show ${displayName} products`}
         onPress={onPress}
-        style={({ pressed }) => [styles.brandRow, pressed && styles.pressed]}>
+        style={styles.brandPressable}>
+      <Card style={styles.brandCard}>
         <ProductThumb product={brand.thumbnailProduct} size={56} />
         <View style={styles.brandCopy}>
-          <ThemedText type="bodyBold" numberOfLines={1}>
+          <ThemedText type="title" numberOfLines={1}>
             {displayName}
           </ThemedText>
           <ThemedText type="caption" themeColor="textSecondary" numberOfLines={1}>
-            {productLabel}
+            {productLabel} · {priceRange}
           </ThemedText>
+          {isCheapest ? <Chip label="Cheapest brand" tone="accent" /> : null}
         </View>
-        <SymbolView name={CHEVRON_ICON} tintColor={theme.textSecondary} size={15} weight="semibold" />
-      </Pressable>
-    </View>
+        <BrandChevron />
+      </Card>
+    </PressableScale>
   );
+}
+
+function BrandChevron() {
+  const { textSecondary } = useTheme();
+  return <SymbolView name={CHEVRON_ICON} tintColor={textSecondary} size={15} weight="semibold" />;
 }
 
 function BrandDetail({
@@ -188,27 +204,26 @@ function BrandDetail({
   onBackToBrands: () => void;
   onChangeQty: (productId: string, qty: number) => void;
 }) {
-  const theme = useTheme();
+  const reducedMotion = useReducedMotion();
 
   return (
     <>
       <View style={styles.detailHeader}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Back to all brands"
-          onPress={onBackToBrands}
-          style={({ pressed }) => [
-            styles.backButton,
-            { backgroundColor: theme.backgroundSelected },
-            pressed && styles.pressed,
-          ]}>
-          <SymbolView name={BACK_ICON} tintColor={theme.accent} size={15} weight="semibold" />
-          <ThemedText type="smallBold" themeColor="accent">
-            All brands
-          </ThemedText>
-        </Pressable>
+        <View style={styles.backButtonWrap}>
+          <View pointerEvents="none" style={styles.backIcon}>
+            <BackChevron />
+          </View>
+          <AppButton
+            accessibilityLabel="Back to all brands"
+            label="All brands"
+            haptic="light"
+            variant="ghost"
+            onPress={onBackToBrands}
+            style={styles.backButton}
+          />
+        </View>
         <View style={styles.detailTitleBlock}>
-          <ThemedText type="heading" numberOfLines={1}>
+          <ThemedText type="title" numberOfLines={1}>
             {formatDisplayName(brandGroup.name)}
           </ThemedText>
           <ThemedText type="caption" themeColor="textSecondary">
@@ -217,12 +232,14 @@ function BrandDetail({
         </View>
       </View>
       <View style={styles.productList}>
-        {brandGroup.products.map((result) => (
+        {brandGroup.products.map((result, index) => (
           <BrandProductCard
             key={result.product.id}
             disabled={disabled}
+            entranceIndex={index}
             qty={qtyByProductId.get(result.product.id) ?? 0}
             result={result}
+            reducedMotion={reducedMotion}
             onChangeQty={(qty) => onChangeQty(result.product.id, qty)}
           />
         ))}
@@ -231,24 +248,32 @@ function BrandDetail({
   );
 }
 
+function BackChevron() {
+  const theme = useTheme();
+  return <SymbolView name={BACK_ICON} tintColor={theme.accent} size={15} weight="semibold" />;
+}
+
 function BrandProductCard({
   disabled,
+  entranceIndex,
   qty,
+  reducedMotion,
   result,
   onChangeQty,
 }: {
   disabled: boolean;
+  entranceIndex: number;
   qty: number;
+  reducedMotion: boolean;
   result: SearchResult;
   onChangeQty: (qty: number) => void;
 }) {
-  const reducedMotion = useReducedMotion();
   const metaLabel = getProductMeta(result.product);
   const productMatchLabel = matchLabel(result);
 
   return (
     <Animated.View
-      entering={FadeIn.duration(reducedMotion ? Motion.fast : Motion.base)}
+      entering={entrance(entranceIndex, reducedMotion)}
       layout={
         reducedMotion
           ? undefined
@@ -353,9 +378,15 @@ function groupSearchResultsByBrand(results: SearchResult[]) {
         thumbnailProduct,
         isOther: name === OTHER_BRANDS,
         firstResultIndex: firstIndexByBrand.get(name) ?? Number.POSITIVE_INFINITY,
+        minPrice: Math.min(...products.flatMap((result) => result.prices.map(currentPrice))),
+        maxPrice: Math.max(...products.flatMap((result) => result.prices.map(currentPrice))),
       };
     })
     .sort(compareBrandGroups);
+}
+
+function currentPrice(price: SearchResult['prices'][number]) {
+  return price.promoPrice ?? price.price;
 }
 
 function getBrandName(brand: string | null) {
@@ -414,22 +445,17 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: Spacing.three,
   },
-  brandCard: {
+  brandList: {
+    gap: Spacing.two,
+  },
+  brandPressable: {
     width: '100%',
   },
-  brandRowShell: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  lastRow: {
-    borderBottomWidth: 0,
-  },
-  brandRow: {
-    minHeight: 92,
+  brandCard: {
+    minHeight: 104,
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.three,
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.three,
   },
   brandCopy: {
     flex: 1,
@@ -439,14 +465,20 @@ const styles = StyleSheet.create({
   detailHeader: {
     gap: Spacing.two,
   },
-  backButton: {
-    minHeight: 36,
+  backButtonWrap: {
     alignSelf: 'flex-start',
-    borderRadius: Radii.chip,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.one,
-    paddingHorizontal: Spacing.two + Spacing.half,
+    position: 'relative',
+  },
+  backButton: {
+    paddingLeft: Spacing.five,
+  },
+  backIcon: {
+    position: 'absolute',
+    left: Spacing.three,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    zIndex: 1,
   },
   detailTitleBlock: {
     gap: Spacing.half,
@@ -477,8 +509,5 @@ const styles = StyleSheet.create({
   },
   addButton: {
     minWidth: 64,
-  },
-  pressed: {
-    opacity: 0.72,
   },
 });
